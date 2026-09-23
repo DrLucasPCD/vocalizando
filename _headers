@@ -1,0 +1,29 @@
+/
+  Cache-Control: no-store
+
+/Index.html
+  Cache-Control: no-store
+
+/manifest.json
+  Cache-Control: no-store
+
+/script.js
+  Cache-Control: no-store
+
+/functional-training.js
+  Cache-Control: no-store
+
+/styles.css
+  Cache-Control: no-store
+
+/audio-context-fix.js
+  Cache-Control: no-store
+
+/vendor/speech-commands.min.js
+  Cache-Control: no-store
+
+/vendor/tf-1.7.4.min.js
+  Cache-Control: no-store
+
+/models/*
+  Cache-Control: no-store

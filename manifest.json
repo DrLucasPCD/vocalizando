@@ -1,14 +1,15 @@
 {
     "name": "Vocalizando",
     "short_name": "Vocalizando",
-    "start_url": "index.html",
+    "id": "/",
+    "start_url": "/?v=20260727-2",
     "display": "standalone",
-    "background_color": "#f2f2f2",
-    "theme_color": "#333",
+    "background_color": "#f4f0e6",
+    "theme_color": "#132f3a",
     "icons": [
       {
         "src": "icon.png",
-        "sizes": "192x192",
+        "sizes": "1024x1024",
         "type": "image/png"
       }
     ]

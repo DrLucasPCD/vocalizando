@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#132f3a">
+  <meta name="description" content="Treino de voz, dicção e articulação com feedback em tempo real.">
+  <title>Vocalizando — Treino de voz e dicção</title>
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="styles.css?v=20260923-1">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#inicio" aria-label="Vocalizando, início">
+      <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>Vocalizando</span>
+    </a>
+    <nav aria-label="Navegação principal">
+      <a href="#trava-linguas">Trava-línguas</a>
+      <a href="#exercicios">Exercícios</a>
+      <a href="#treino-funcional">Treino funcional</a>
+      <a href="#relatorio">Relatório</a>
+      <a href="#controle-ocular">Controle ocular</a>
+    </nav>
+    <div id="mic-indicator" aria-live="polite">
+      <span class="dot"></span>
+      <span class="label">Aguardando</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" id="inicio">
+      <div class="hero-copy">
+        <span class="eyebrow">Seu estúdio de voz pessoal</span>
+        <h1>Solte a voz.<br><em>Destrave a fala.</em></h1>
+        <p>Exercícios guiados, desafios de dicção e feedback em tempo real para você falar com mais clareza e confiança.</p>
+        <div class="hero-actions">
+          <a class="primary-action" href="#trava-linguas">Começar desafio <span aria-hidden="true">↓</span></a>
+          <a class="secondary-action" href="#exercicios">Ver meus exercícios</a>
+        </div>
+      </div>
+      <div class="hero-visual" aria-hidden="true">
+        <div class="sound-orbit orbit-one"></div>
+        <div class="sound-orbit orbit-two"></div>
+        <div class="sound-core">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="floating-word word-one">TRÊS TIGRES</div>
+        <div class="floating-word word-two">RÁPIDO!</div>
+      </div>
+    </section>
+
+    <section class="tongue-section" id="trava-linguas">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Desafio de dicção</span>
+          <h2>Um trava-língua.<br>Uma nova tentativa.</h2>
+        </div>
+        <div class="difficulty-filter" role="group" aria-label="Filtrar dificuldade">
+          <button type="button" class="active" data-difficulty="todos">Todos</button>
+          <button type="button" data-difficulty="facil">Fácil</button>
+          <button type="button" data-difficulty="medio">Médio</button>
+          <button type="button" data-difficulty="dificil">Difícil</button>
+        </div>
+      </div>
+
+      <div id="microphone-compatibility" class="compatibility-note" hidden role="status">
+        <span aria-hidden="true">i</span>
+        <p><strong id="compatibility-title">Atenção ao microfone</strong><span id="compatibility-text"></span></p>
+      </div>
+
+      <div class="tongue-grid">
+        <article class="challenge-card">
+          <div class="challenge-meta">
+            <span id="twister-difficulty" class="level-badge">Fácil</span>
+            <span id="twister-focus" class="focus-badge">Foco: som do R</span>
+            <button id="new-twister" type="button" class="round-button" aria-label="Sortear outro trava-língua" title="Sortear outro trava-língua">↻</button>
+          </div>
+          <p id="twister-text" class="twister-text">O rato roeu a roupa do rei de Roma.</p>
+          <div class="challenge-actions">
+            <button id="hear-twister" type="button" class="outline-button"><span aria-hidden="true">◖))</span> Ouvir exemplo</button>
+            <button id="record-twister" type="button" class="record-button"><span class="mic-shape" aria-hidden="true"></span> Gravar minha voz</button>
+          </div>
+          <div class="audio-controls" aria-label="Controles do exemplo em áudio">
+            <button id="pause-twister" type="button" aria-label="Pausar ou continuar exemplo" title="Pausar ou continuar">Ⅱ</button>
+            <button id="repeat-twister" type="button" aria-label="Repetir exemplo" title="Repetir exemplo">↻</button>
+            <label for="twister-speed">Velocidade
+              <select id="twister-speed">
+                <option value="0.75">Lenta</option>
+                <option value="1" selected>Normal</option>
+                <option value="1.2">Rápida</option>
+              </select>
+            </label>
+          </div>
+          <div id="twister-listening" class="listening-panel" hidden aria-live="polite">
+            <span class="audio-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+            <span><strong>Estou ouvindo…</strong><small id="live-transcript">Diga a frase acima</small></span>
+          </div>
+          <label class="assist-toggle">
+            <input id="assisted-recognition" type="checkbox" checked>
+            <span><strong>Reconhecimento assistido</strong><small>Aceita pausas maiores e compara diferentes interpretações da frase.</small></span>
+          </label>
+          <p class="privacy-copy">O áudio não é armazenado pelo Vocalizando. A nota é uma estimativa da transcrição do navegador e não avalia clinicamente sua fala.</p>
+          <div id="twister-error" class="inline-alert" role="alert" hidden></div>
+          <button id="register-practice" type="button" class="register-practice" hidden>Registrar prática sem nota</button>
+        </article>
+
+        <aside class="score-card" aria-live="polite">
+          <div id="score-empty" class="score-state">
+            <div class="score-placeholder"><span>?</span></div>
+            <span class="score-kicker">Sua avaliação</span>
+            <h3>Pronto para tentar?</h3>
+            <p>Grave o trava-língua e receba uma nota instantânea.</p>
+            <div class="quick-tip"><span aria-hidden="true">✦</span><p><strong>Dica rápida</strong>Clareza vale mais que velocidade. Comece devagar.</p></div>
+          </div>
+          <div id="score-result" class="score-state" hidden>
+            <div id="score-ring" class="score-ring"><div><strong id="pronunciation-score">0</strong><span>/100</span></div></div>
+            <span class="score-kicker">Resultado</span>
+            <h3 id="score-title">Muito bem!</h3>
+            <p id="score-feedback"></p>
+            <div class="heard-box"><span>O que foi entendido</span><q id="heard-text"></q></div>
+            <button id="try-again" type="button" class="try-button">Tentar novamente</button>
+          </div>
+        </aside>
+      </div>
+
+      <div class="challenge-stats" aria-label="Seu progresso nos trava-línguas">
+        <div><span>Melhor nota</span><strong id="twister-best">—</strong><small>pontos</small></div>
+        <div><span>Sequência</span><strong id="twister-streak">0</strong><small>acertos acima de 75</small></div>
+        <div><span>Tentativas hoje</span><strong id="twister-attempts">0</strong><small>desafios concluídos</small></div>
+      </div>
+    </section>
+
+    <section class="exercise-section" id="exercicios">
+      <div class="section-heading compact">
+        <div>
+          <span class="eyebrow">Treino reconhecido por IA</span>
+          <h2>Seus exercícios diários</h2>
+          <p>O modelo identifica os sons treinados e atualiza suas repetições automaticamente.</p>
+        </div>
+        <div id="status" class="model-pill">
+          <span class="status-light"></span>
+          <p id="model-status">Modelo: <span>Pronto para carregar</span></p>
+        </div>
+      </div>
+
+      <section id="initial-assessment" class="assessment-panel" aria-labelledby="assessment-title">
+        <div class="assessment-copy">
+          <span class="card-label">Avaliação inicial</span>
+          <h3 id="assessment-title">Qual parte exige mais esforço hoje?</h3>
+          <p>Escolha como cada atividade está para receber uma sugestão de começo. Isso pode ser alterado quando quiser.</p>
+        </div>
+        <div class="assessment-fields">
+          <label>Articular R e L<select id="assessment-tara"><option value="0">Tranquilo</option><option value="1">Um pouco difícil</option><option value="2">Muito difícil</option></select></label>
+          <label>Sustentar a voz<select id="assessment-iii"><option value="0">Tranquilo</option><option value="1">Um pouco difícil</option><option value="2">Muito difícil</option></select></label>
+          <label>Falar frases completas<select id="assessment-twister"><option value="0">Tranquilo</option><option value="1">Um pouco difícil</option><option value="2">Muito difícil</option></select></label>
+        </div>
+        <button id="save-assessment" type="button" class="compact-action">Gerar sugestão</button>
+        <p id="assessment-result" class="assessment-result" aria-live="polite">Responda para personalizar o início do treino.</p>
+      </section>
+
+      <section class="guided-panel" aria-labelledby="guided-title">
+        <div class="guided-heading">
+          <div><span class="card-label">Modo treino guiado</span><h3 id="guided-title">Séries com descanso automático</h3></div>
+          <div class="guide-choice" role="group" aria-label="Escolher exercício guiado">
+            <button type="button" class="active" data-guide="tara">Tá Rá Lá</button>
+            <button type="button" data-guide="iii">III</button>
+          </div>
+        </div>
+        <div class="guide-progress" aria-live="polite">
+          <div><span>Etapa</span><strong id="guide-set">Série 1 de 3</strong></div>
+          <div><span>Repetições</span><strong id="guide-reps">0 de 5</strong></div>
+          <div><span>Status</span><strong id="guide-status">Pronto</strong></div>
+        </div>
+        <button id="guide-start" type="button" class="compact-action">Começar treino guiado</button>
+      </section>
+
+      <section class="permission-panel" aria-label="Permissões do dispositivo">
+        <div><span class="card-label">Permissões</span><h3>Microfone e câmera</h3><p>Confira o acesso antes de começar para evitar interrupções.</p></div>
+        <div class="permission-item"><span>Microfone</span><strong id="microphone-permission">Não verificado</strong><button id="check-microphone" type="button">Verificar</button></div>
+        <div class="permission-item"><span>Câmera</span><strong id="camera-permission">Não verificada</strong><button id="check-camera" type="button">Verificar</button></div>
+      </section>
+
+      <section id="coach" class="confidence-card">
+        <div class="confidence-info">
+          <span class="card-label">Leitura ao vivo</span>
+          <strong>Medidor de confiança</strong>
+          <p class="last">Último reconhecimento: <b id="last-label">—</b></p>
+        </div>
+        <div class="confidence-meter">
+          <div class="meter-head"><span>Precisão do modelo</span><strong id="conf-value">0%</strong></div>
+          <div class="meter-bar"><div id="conf-bar"></div></div>
+        </div>
+      </section>
+
+      <section id="counters" class="exercise-grid">
+        <article class="exercise" id="tara">
+          <div class="exercise-top"><span class="exercise-number">01</span><span class="exercise-tag">Articulação</span></div>
+          <h3>Tá Rá Lá</h3>
+          <p class="series">3 séries × 5 repetições</p>
+          <div class="counter-row"><span>Progresso de hoje</span><strong><span id="tara-count">0</span> / 15</strong></div>
+          <div class="progress"><div class="bar" id="tara-bar" style="width:0%"></div></div>
+          <div class="feedback" id="tara-feedback">Vamos começar!</div>
+          <div class="count-adjust"><span>Corrigir contagem</span><button type="button" data-adjust="tara" data-delta="-1" aria-label="Diminuir Tá Rá Lá">−</button><button type="button" data-adjust="tara" data-delta="1" aria-label="Aumentar Tá Rá Lá">+</button></div>
+          <button id="reset-tara" type="button" class="reset-button">Resetar exercício</button>
+        </article>
+
+        <article class="exercise" id="iii">
+          <div class="exercise-top"><span class="exercise-number">02</span><span class="exercise-tag alt">Sustentação</span></div>
+          <h3>III</h3>
+          <p class="series">4 séries × 5 repetições</p>
+          <div class="counter-row"><span>Progresso de hoje</span><strong><span id="iii-count">0</span> / 20</strong></div>
+          <div class="progress"><div class="bar" id="iii-bar" style="width:0%"></div></div>
+          <div class="feedback" id="iii-feedback">Quando estiver pronto, clique em Iniciar.</div>
+          <div class="count-adjust"><span>Corrigir contagem</span><button type="button" data-adjust="iii" data-delta="-1" aria-label="Diminuir III">−</button><button type="button" data-adjust="iii" data-delta="1" aria-label="Aumentar III">+</button></div>
+          <button id="reset-iii" type="button" class="reset-button">Resetar exercício</button>
+        </article>
+      </section>
+
+      <div class="recognition-action">
+        <button id="start-btn" aria-pressed="false"><span class="mic-shape" aria-hidden="true"></span><span class="start-label">Iniciar reconhecimento</span></button>
+        <p>O reconhecimento permanece ativo até você interromper.</p>
+        <div id="debug" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="functional-section" id="treino-funcional" aria-labelledby="functional-title">
+      <div class="section-heading compact">
+        <div>
+          <span class="eyebrow">Prática de fala</span>
+          <h2 id="functional-title">Treino funcional</h2>
+          <p>Escolha um foco, pratique no seu ritmo e registre como a fala funcionou para você.</p>
+        </div>
+        <div class="functional-today" aria-live="polite"><strong id="functional-today-count">0</strong><span>tentativas hoje</span></div>
+      </div>
+
+      <div class="functional-layout">
+        <div class="functional-workspace">
+          <div class="functional-controls">
+            <label for="functional-exercise">Foco do treino</label>
+            <select id="functional-exercise"></select>
+            <label for="functional-duration">Minutos por bloco</label>
+            <select id="functional-duration"><option value="2">2 min</option><option value="3" selected>3 min</option><option value="4">4 min</option><option value="5">5 min</option></select>
+          </div>
+          <div class="functional-block-head">
+            <div><span id="functional-step" class="eyebrow">1 de 8</span><h3 id="functional-name"></h3></div>
+            <strong id="functional-clock" aria-live="off">03:00</strong>
+          </div>
+          <p id="functional-instruction" class="functional-instruction"></p>
+          <div id="functional-prompt" class="functional-prompt" aria-live="polite"></div>
+          <p id="functional-guidance" class="functional-guidance"></p>
+          <div class="functional-controls functional-targets">
+            <label for="functional-words">Minhas palavras difíceis <small>(uma por linha)</small></label>
+            <textarea id="functional-words" rows="3" placeholder="Ex.: neurologia"></textarea>
+            <label for="functional-phrase">Minhas frases importantes <small>(uma por linha, até 10)</small></label>
+            <textarea id="functional-phrase" rows="3" placeholder="Ex.: Quero explicar uma ideia na aula"></textarea>
+            <button id="functional-save-targets" type="button" class="functional-secondary">Salvar palavras e frases</button>
+          </div>
+          <div class="functional-actions">
+            <button id="functional-timer" type="button" class="functional-primary">Iniciar tempo</button>
+            <button id="functional-reset-timer" type="button" class="functional-secondary">Reiniciar tempo</button>
+            <button id="functional-prev" type="button" class="functional-secondary">Anterior</button>
+            <button id="functional-next" type="button" class="functional-secondary">Próximo foco</button>
+          </div>
+          <p id="functional-status" class="functional-status" role="status">Faça pausas sempre que precisar.</p>
+        </div>
+
+        <div class="functional-review">
+          <h3>Ouça sua tentativa</h3>
+          <label for="functional-version">Versão</label>
+          <select id="functional-version"><option value="habitual">Habitual</option><option value="clara">Clara</option></select>
+          <div class="functional-actions">
+            <button id="functional-record" type="button" class="functional-primary">Gravar</button>
+            <button id="functional-stop" type="button" class="functional-secondary" disabled>Parar</button>
+          </div>
+          <div id="functional-audio-list"></div>
+          <p class="functional-guidance">Os áudios ficam apenas nesta visita. Baixe os que deseja guardar antes de fechar o site.</p>
+          <div class="functional-ratings">
+            <label for="functional-clarity">Clareza percebida (0–10)</label>
+            <input id="functional-clarity" type="range" min="0" max="10" value="5">
+            <output id="functional-clarity-value" for="functional-clarity">5</output>
+            <label for="functional-effort">Esforço (0–10)</label>
+            <input id="functional-effort" type="range" min="0" max="10" value="5">
+            <output id="functional-effort-value" for="functional-effort">5</output>
+          </div>
+          <label for="functional-note">O que ajudou?</label>
+          <textarea id="functional-note" rows="2" maxlength="300" placeholder="Ex.: fazer uma pausa antes da frase"></textarea>
+          <button id="functional-save-attempt" type="button" class="functional-primary functional-save">Registrar tentativa</button>
+          <p class="functional-guidance">Seu registro vale mesmo sem gravação ou transcrição. A pontuação do modelo não avalia estes exercícios.</p>
+        </div>
+      </div>
+
+      <div class="functional-followup">
+        <div>
+          <h3>Prática recente</h3>
+          <div id="functional-history" aria-live="polite"></div>
+        </div>
+        <div>
+          <h3>Linha de base</h3>
+          <p>Repita a cada duas semanas, nas mesmas condições. Um ouvinte pode informar quantas palavras entendeu sem ver a frase.</p>
+          <form id="functional-baseline">
+            <label for="baseline-goal">Meta de comunicação</label>
+            <input id="baseline-goal" type="text" maxlength="180" placeholder="Ex.: ser entendido em consultas">
+            <label for="baseline-intelligibility">Palavras entendidas pelo ouvinte (%)</label>
+            <input id="baseline-intelligibility" type="number" min="0" max="100" step="1" inputmode="numeric" placeholder="Opcional">
+            <label for="baseline-effort">Esforço ao falar (0–10)</label>
+            <input id="baseline-effort" type="number" min="0" max="10" step="1" inputmode="numeric" placeholder="Opcional">
+            <label for="baseline-fatigue">Fadiga após conversar (0–10)</label>
+            <input id="baseline-fatigue" type="number" min="0" max="10" step="1" inputmode="numeric" placeholder="Opcional">
+            <span class="baseline-label">/a/ sustentado, 3 tentativas (segundos)</span>
+            <div class="baseline-mpt"><input id="baseline-mpt-1" type="number" min="0" max="120" step="0.1" inputmode="decimal" aria-label="Primeira tentativa"><input id="baseline-mpt-2" type="number" min="0" max="120" step="0.1" inputmode="decimal" aria-label="Segunda tentativa"><input id="baseline-mpt-3" type="number" min="0" max="120" step="0.1" inputmode="decimal" aria-label="Terceira tentativa"></div>
+            <label for="baseline-note">Contexto e observações</label>
+            <textarea id="baseline-note" rows="2" maxlength="300" placeholder="Microfone, distância, ambiente e o que mudou"></textarea>
+            <button type="submit" class="functional-secondary">Salvar linha de base</button>
+          </form>
+          <div id="baseline-history" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="report-section" id="relatorio">
+      <div class="section-heading compact report-heading">
+        <div>
+          <span class="eyebrow">Acompanhamento personalizado</span>
+          <h2>Relatório da sua voz</h2>
+          <p>Veja o desempenho de hoje, acompanhe sua constância e descubra no que focar no próximo treino.</p>
+        </div>
+        <span id="report-date" class="report-date">Hoje</span>
+      </div>
+
+      <div class="report-summary">
+        <article class="overall-card">
+          <div id="overall-ring" class="overall-ring"><div><strong id="overall-score">0</strong><span>/100</span></div></div>
+          <div><span class="card-label">Desempenho geral</span><h3 id="overall-title">Comece seu treino</h3><p id="overall-copy">Conclua repetições ou grave um trava-língua para gerar sua análise.</p></div>
+        </article>
+        <article class="next-focus-card">
+          <span class="card-label">Próximo foco</span><div class="focus-icon" aria-hidden="true">↗</div>
+          <h3 id="next-focus-title">Faça a primeira avaliação</h3><p id="next-focus-copy">Seus pontos de melhoria aparecerão aqui conforme você pratica.</p>
+          <a id="next-focus-link" href="#exercicios">Ir para o treino <span aria-hidden="true">→</span></a>
+        </article>
+      </div>
+
+      <div class="performance-grid" aria-label="Desempenho por exercício">
+        <article class="performance-card">
+          <div class="performance-head"><div><span class="exercise-tag">Articulação</span><h3>Tá Rá Lá</h3></div><strong id="report-tara-score" class="performance-score">0</strong></div>
+          <div class="performance-bar"><span id="report-tara-bar"></span></div>
+          <dl class="performance-details"><div><dt>Repetições</dt><dd id="report-tara-reps">0 de 15</dd></div><div><dt>Precisão média</dt><dd id="report-tara-confidence">—</dd></div></dl>
+          <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-tara-tip">Inicie o reconhecimento para avaliarmos sua articulação.</span></p></div>
+        </article>
+        <article class="performance-card">
+          <div class="performance-head"><div><span class="exercise-tag alt">Sustentação</span><h3>III</h3></div><strong id="report-iii-score" class="performance-score">0</strong></div>
+          <div class="performance-bar"><span id="report-iii-bar"></span></div>
+          <dl class="performance-details"><div><dt>Repetições</dt><dd id="report-iii-reps">0 de 20</dd></div><div><dt>Precisão média</dt><dd id="report-iii-confidence">—</dd></div></dl>
+          <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-iii-tip">Inicie o reconhecimento para avaliarmos sua sustentação.</span></p></div>
+        </article>
+        <article class="performance-card">
+          <div class="performance-head"><div><span class="exercise-tag challenge">Dicção</span><h3>Trava-línguas</h3></div><strong id="report-twister-score" class="performance-score">0</strong></div>
+          <div class="performance-bar"><span id="report-twister-bar"></span></div>
+          <dl class="performance-details"><div><dt>Tentativas</dt><dd id="report-twister-attempts">0 hoje</dd></div><div><dt>Melhor nota</dt><dd id="report-twister-best">—</dd></div></dl>
+          <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-twister-tip">Grave um desafio para receber uma orientação de dicção.</span></p></div>
+        </article>
+      </div>
+
+      <article class="weekly-card">
+        <div class="weekly-head"><div><span class="card-label">Últimos 7 dias</span><h3>Constância de treino</h3></div><p><strong id="weekly-active-days">0</strong> dias ativos</p></div>
+        <div id="weekly-chart" class="weekly-chart" aria-label="Atividade dos últimos sete dias"></div>
+      </article>
+
+      <article class="exercise-history">
+        <div class="weekly-head"><div><span class="card-label">Evolução por exercício</span><h3>Repetições e confiança</h3></div><p>Últimos 7 dias</p></div>
+        <div class="history-row"><strong>Tá Rá Lá</strong><div id="history-tara" class="history-days"></div></div>
+        <div class="history-row"><strong>III</strong><div id="history-iii" class="history-days"></div></div>
+      </article>
+
+      <section class="data-panel" aria-label="Seus dados">
+        <div><span class="card-label">Dados no dispositivo</span><h3>Exportar ou apagar histórico</h3><p>Os registros ficam neste navegador. Exporte uma cópia antes de apagar.</p></div>
+        <div class="data-actions"><button id="export-data" type="button">Exportar dados</button><button id="delete-data" type="button" class="danger-action">Apagar meus dados</button></div>
+      </section>
+    </section>
+
+    <section id="controle-ocular" class="eye-section">
+      <div class="eye-intro">
+        <span class="eyebrow light">Acessibilidade experimental</span>
+        <h2>Controle os botões<br>com o olhar.</h2>
+        <p>Ative a câmera, calibre nove pontos e encare um botão por cerca de um segundo para acioná-lo sem usar as mãos.</p>
+      </div>
+      <section id="eye" class="eye-card">
+        <div class="eye-card-head">
+          <div><span class="card-label">WebGazer</span><strong>Controle ocular</strong></div>
+          <span id="eye-status" class="eye-status">Desligado</span>
+        </div>
+        <p class="last">Use a câmera para controlar os botões com o olhar.</p>
+        <div class="eye-actions">
+          <button id="eye-toggle" type="button">Ativar câmera</button>
+          <button id="eye-calibrate" type="button" disabled>Calibrar</button>
+          <button id="eye-preview" type="button" disabled>Preview</button>
+        </div>
+        <p id="eye-hint" class="eye-hint">Dica: foque no botão até o círculo completar.</p>
+        <div id="eye-accuracy" class="eye-accuracy" hidden aria-live="polite"></div>
+        <div class="secure-note"><span aria-hidden="true">i</span> Funciona melhor em HTTPS ou localhost e com boa iluminação.</div>
+      </section>
+    </section>
+  </main>
+
+  <footer>
+    <a class="brand footer-brand" href="#inicio"><span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span><span>Vocalizando</span></a>
+    <p>Treine hoje. Fale melhor todos os dias.</p>
+    <a href="#inicio">Voltar ao topo ↑</a>
+  </footer>
+
+  <div id="gaze-cursor" aria-hidden="true"><span class="ring"></span></div>
+
+  <div id="calibration-overlay" class="calib" aria-hidden="true">
+    <div class="calib-card" role="dialog" aria-modal="true" aria-labelledby="calib-title" aria-describedby="calib-instruction">
+      <div class="calib-heading">
+        <div>
+          <span class="eyebrow">Controle ocular</span>
+          <h3 id="calib-title">Calibração guiada</h3>
+        </div>
+        <span id="calib-progress-text" class="calib-progress-text">0%</span>
+      </div>
+      <p id="calib-instruction" aria-live="polite">Mantenha a cabeça parada, olhe para o ponto destacado e clique nele.</p>
+      <div class="calib-progress" aria-hidden="true"><span id="calib-progress-bar"></span></div>
+      <p id="calib-step" class="calib-step" aria-live="polite">Preparando ponto central…</p>
+    </div>
+
+    <div class="calib-grid" aria-label="Pontos de calibração">
+      <button class="calib-dot" data-dot="1" aria-label="Ponto superior esquerdo"><span></span></button>
+      <button class="calib-dot" data-dot="2" aria-label="Ponto superior central"><span></span></button>
+      <button class="calib-dot" data-dot="3" aria-label="Ponto superior direito"><span></span></button>
+      <button class="calib-dot" data-dot="4" aria-label="Ponto central esquerdo"><span></span></button>
+      <button class="calib-dot" data-dot="5" aria-label="Ponto central"><span></span></button>
+      <button class="calib-dot" data-dot="6" aria-label="Ponto central direito"><span></span></button>
+      <button class="calib-dot" data-dot="7" aria-label="Ponto inferior esquerdo"><span></span></button>
+      <button class="calib-dot" data-dot="8" aria-label="Ponto inferior central"><span></span></button>
+      <button class="calib-dot" data-dot="9" aria-label="Ponto inferior direito"><span></span></button>
+    </div>
+
+    <div class="calib-footer">
+      <p class="calib-tip"><strong>Dica:</strong> mantenha o rosto dentro do quadro verde e não mova a tela.</p>
+      <div class="calib-actions">
+        <button id="calib-reset" type="button">Reiniciar</button>
+        <button id="calib-use-anyway" type="button" hidden>Usar mesmo assim</button>
+        <button id="calib-close" type="button">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/audio-context-fix.js?v=20260728-1"></script>
+  <script src="/vendor/tf-1.7.4.min.js?v=20260728-1"></script>
+  <script src="/vendor/speech-commands.min.js?v=20260728-1"></script>
+  <script src="script.js?v=20260923-1"></script>
+  <script src="functional-training.js?v=20260923-1"></script>
+</body>
+</html>
