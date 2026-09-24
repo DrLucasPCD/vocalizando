@@ -9,7 +9,7 @@
 
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=20260923-2">
+  <link rel="stylesheet" href="styles.css?v=20260924-1">
 </head>
 <body>
   <header class="site-header">
@@ -250,11 +250,17 @@
           </div>
           <p id="functional-instruction" class="functional-instruction"></p>
           <div id="functional-prompt" class="functional-prompt" aria-live="polite"></div>
+          <button id="functional-repeat-prompt" type="button" class="functional-secondary functional-repeat-prompt" disabled>Repetir última frase</button>
           <p id="functional-guidance" class="functional-guidance"></p>
           <div class="functional-live-count" aria-live="polite">
             <div><span>Tentativas deste foco hoje</span><strong id="functional-exercise-count">0</strong></div>
             <div class="functional-level" aria-hidden="true"><span id="functional-level-bar"></span></div>
             <span id="functional-live">Microfone desligado</span>
+          </div>
+          <div class="functional-score" aria-live="polite">
+            <div><span>Nota de semelhança acústica</span><strong id="functional-score">—</strong></div>
+            <p id="functional-score-detail">Grave uma tentativa e escolha uma referência para esta frase.</p>
+            <button id="functional-set-reference" type="button" class="functional-secondary" disabled>Usar última tentativa como referência</button>
           </div>
           <div class="functional-actions functional-listen-actions">
             <button id="functional-record" type="button" class="functional-primary">Iniciar escuta</button>
@@ -294,7 +300,7 @@
           <textarea id="functional-note" rows="2" maxlength="300" placeholder="Ex.: fazer uma pausa antes da frase"></textarea>
           <button id="functional-save-review" type="button" class="functional-secondary functional-save">Salvar minha avaliação</button>
           <div class="functional-correction" aria-label="Corrigir contagem"><button id="functional-add-attempt" type="button" class="functional-secondary">+1 tentativa</button><button id="functional-undo-attempt" type="button" class="functional-secondary">Desfazer última</button></div>
-          <p class="functional-guidance">A escuta detecta atividade sonora, não avalia se a palavra saiu correta. A avaliação de clareza é sua.</p>
+          <p class="functional-guidance">A nota compara sua fala com uma referência sua da mesma frase. Não mede se as palavras foram entendidas nem substitui a avaliação de um ouvinte.</p>
         </div>
       </div>
 
@@ -458,6 +464,6 @@
   <script src="/vendor/tf-1.7.4.min.js?v=20260728-1"></script>
   <script src="/vendor/speech-commands.min.js?v=20260728-1"></script>
   <script src="script.js?v=20260923-1"></script>
-  <script src="functional-training.js?v=20260923-2"></script>
+  <script src="functional-training.js?v=20260924-1"></script>
 </body>
 </html>

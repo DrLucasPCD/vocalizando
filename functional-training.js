@@ -1,6 +1,7 @@
 const FUNCTIONAL_STORAGE = "vocalizing-functional-v1";
 const FUNCTIONAL_BASELINE_STORAGE = "vocalizing-functional-baseline-v1";
 const FUNCTIONAL_TARGETS_STORAGE = "vocalizing-functional-targets-v1";
+const FUNCTIONAL_REFERENCES_STORAGE = "vocalizing-functional-references-v1";
 
 const FUNCTIONAL_EXERCISES = [
   {
@@ -71,6 +72,8 @@ const FUNCTIONAL_EXERCISES = [
 let functionalAttempts = [];
 let functionalBaselines = [];
 let functionalTargets = { words: [], phrases: [] };
+let functionalReferences = {};
+let functionalLastSignature = null;
 let functionalIndex = 0;
 let functionalPromptIndex = 0;
 let functionalRemaining = 180;
@@ -145,7 +148,7 @@ function functionalResetTimer() {
 function functionalRenderExercise() {
   const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
   const prompts = functionalPrompts(exercise);
-  functionalPromptIndex = Math.min(functionalPromptIndex, prompts.length - 1);
+  functionalPromptIndex = Math.max(0, Math.min(functionalPromptIndex, prompts.length - 1));
   document.getElementById("functional-exercise").value = exercise.id;
   document.getElementById("functional-step").textContent = `${functionalIndex + 1} de ${FUNCTIONAL_EXERCISES.length}`;
   document.getElementById("functional-name").textContent = exercise.name;
@@ -199,14 +202,56 @@ function functionalLastAttemptIndex() {
   return -1;
 }
 
-function functionalCountAttempt(source, voicedMs = null) {
+function functionalReferenceKey(exercise, prompt) {
+  return `${exercise}\n${prompt}`;
+}
+
+function functionalFrameDistance(left, right) {
+  if (!left && !right) return 0;
+  if (!left || !right) return 0.7;
+  return left.reduce((sum, value, index) => sum + Math.abs(value - (right[index] || 0)), 0) / 2;
+}
+
+function functionalAcousticScore(signature, reference) {
+  const left = signature?.frames;
+  const right = reference?.frames;
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length < 4 || right.length < 4 || !reference.durationMs || !reference.voicedMs) return null;
+  const previous = new Float64Array(right.length + 1).fill(Infinity);
+  const steps = new Uint16Array(right.length + 1);
+  previous[0] = 0;
+  for (const frame of left) {
+    const current = new Float64Array(right.length + 1).fill(Infinity);
+    const currentSteps = new Uint16Array(right.length + 1);
+    for (let index = 1; index <= right.length; index++) {
+      const options = [
+        [previous[index], steps[index]],
+        [current[index - 1], currentSteps[index - 1]],
+        [previous[index - 1], steps[index - 1]]
+      ];
+      const best = options.reduce((a, b) => a[0] <= b[0] ? a : b);
+      current[index] = best[0] + functionalFrameDistance(frame, right[index - 1]);
+      currentSteps[index] = best[1] + 1;
+    }
+    previous.set(current);
+    steps.set(currentSteps);
+  }
+  const spectralDistance = Math.min(1, previous[right.length] / steps[right.length]);
+  const durationDistance = Math.min(1, Math.abs(Math.log(signature.durationMs / reference.durationMs)) / Math.log(2));
+  const voicedDistance = Math.min(1, Math.abs(Math.log(signature.voicedMs / reference.voicedMs)) / Math.log(2));
+  return Math.max(0, Math.min(100, Math.round(100 - spectralDistance * 65 - durationDistance * 20 - voicedDistance * 15)));
+}
+
+function functionalCountAttempt(source, voicedMs = null, signature = null) {
   const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
+  const prompt = functionalPrompts(exercise)[functionalPromptIndex];
+  const reference = functionalReferences[functionalReferenceKey(exercise.id, prompt)];
   const attempt = {
     at: new Date().toISOString(),
     exercise: exercise.id,
-    prompt: functionalPrompts(exercise)[functionalPromptIndex],
+    prompt,
     source,
     voicedMs,
+    score: signature && reference ? functionalAcousticScore(signature, reference) : null,
     clarity: null,
     effort: null,
     note: ""
@@ -214,11 +259,14 @@ function functionalCountAttempt(source, voicedMs = null) {
   const next = [...functionalAttempts, attempt];
   if (!functionalPersist(FUNCTIONAL_STORAGE, next)) return false;
   functionalAttempts = next;
+  functionalLastSignature = signature ? { at: attempt.at, exercise: exercise.id, prompt, signature } : null;
   const prompts = functionalPrompts(exercise);
   functionalPromptIndex = (functionalPromptIndex + 1) % prompts.length;
   functionalRenderExercise();
   functionalRenderHistory();
-  functionalMessage(source === "auto" ? "Tentativa contada automaticamente. Continue ou faça uma pausa." : "Contagem corrigida.");
+  functionalMessage(source === "auto"
+    ? Number.isFinite(attempt.score) ? `Tentativa contada. Semelhança com sua referência: ${attempt.score} de 100.` : "Tentativa contada. Defina uma referência desta frase para receber nota."
+    : "Contagem corrigida; sem nota de áudio.");
   return true;
 }
 
@@ -228,12 +276,37 @@ function functionalFinishSegment() {
   if (!segment) return;
   const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
   const minimumMs = exercise.id === "transferencia" ? 1800 : ["respiracao", "voz"].includes(exercise.id) ? 500 : 250;
-  if (segment.voicedMs >= minimumMs) functionalCountAttempt("auto", Math.round(segment.voicedMs));
+  if (segment.voicedMs >= minimumMs) {
+    while (segment.frames[segment.frames.length - 1] === null) segment.frames.pop();
+    const signature = segment.frames.length >= 4 ? {
+      frames: segment.frames,
+      durationMs: Math.round(segment.lastSoundAt - segment.startedAt + 70),
+      voicedMs: Math.round(segment.voicedMs)
+    } : null;
+    functionalCountAttempt("auto", Math.round(segment.voicedMs), signature);
+  }
   document.getElementById("functional-live").textContent = functionalListening ? "Aguardando sua voz" : "Microfone desligado";
+}
+
+function functionalSpectrum(analyser, frequencies, bands) {
+  analyser.getFloatFrequencyData(frequencies);
+  const values = bands.map(([start, end]) => {
+    let power = 0;
+    for (let index = start; index < end; index++) power += 10 ** (Math.max(-100, frequencies[index]) / 10);
+    return Math.sqrt(power / Math.max(1, end - start));
+  });
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return values.map(value => Math.round(value / total * 10000) / 10000);
 }
 
 function functionalObserveAudio(analyser) {
   const samples = new Uint8Array(analyser.fftSize);
+  const frequencies = new Float32Array(analyser.frequencyBinCount);
+  const edges = [80, 150, 240, 360, 540, 800, 1200, 1800, 2700, 4000, 6000];
+  const bands = edges.slice(0, -1).map((start, index) => [
+    Math.max(1, Math.floor(start * analyser.fftSize / analyser.context.sampleRate)),
+    Math.max(2, Math.ceil(edges[index + 1] * analyser.fftSize / analyser.context.sampleRate))
+  ]);
   functionalMonitor = setInterval(() => {
     if (!functionalListening) return;
     analyser.getByteTimeDomainData(samples);
@@ -247,18 +320,21 @@ function functionalObserveAudio(analyser) {
     const threshold = Math.max(0.004, functionalNoiseFloor * 2);
     if (rms >= threshold) {
       if (!functionalSegment) {
-        functionalSegment = { voicedMs: 0, lastSoundAt: now };
+        functionalSegment = { voicedMs: 0, startedAt: now, lastSoundAt: now, frames: [] };
         document.getElementById("functional-live").textContent = "Som captado";
       }
       functionalSegment.voicedMs += elapsed;
       functionalSegment.lastSoundAt = now;
+      functionalSegment.frames.push(functionalSpectrum(analyser, frequencies, bands));
     } else if (functionalSegment) {
       const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
       const gapMs = exercise.id === "transferencia" ? 5000 : ["ritmo", "prosodia", "voz"].includes(exercise.id) ? 1500 : 1000;
       if (now - functionalSegment.lastSoundAt >= gapMs) functionalFinishSegment();
+      else functionalSegment.frames.push(null);
     } else {
       functionalNoiseFloor = functionalNoiseFloor * 0.98 + rms * 0.02;
     }
+    if (functionalSegment?.frames.length > 120) functionalSegment.frames = functionalSegment.frames.filter((_, index) => index % 2 === 0);
   }, 70);
 }
 
@@ -396,11 +472,62 @@ function functionalSaveReview() {
 function functionalUndoAttempt() {
   const index = functionalLastAttemptIndex();
   if (index < 0) return;
+  if (functionalLastSignature?.at === functionalAttempts[index].at) functionalLastSignature = null;
   const updated = functionalAttempts.filter((_, itemIndex) => itemIndex !== index);
   if (!functionalPersist(FUNCTIONAL_STORAGE, updated)) return;
   functionalAttempts = updated;
   functionalRenderHistory();
   functionalMessage("Última tentativa deste foco removida.");
+}
+
+function functionalRepeatPrompt() {
+  const index = functionalLastAttemptIndex();
+  if (index < 0) return;
+  const prompts = functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]);
+  const promptIndex = prompts.indexOf(functionalAttempts[index].prompt);
+  if (promptIndex < 0) return;
+  functionalPromptIndex = promptIndex;
+  functionalRenderExercise();
+  functionalMessage("Frase anterior selecionada para outra tentativa.");
+}
+
+function functionalRenderScore() {
+  const index = functionalLastAttemptIndex();
+  const attempt = index >= 0 ? functionalAttempts[index] : null;
+  const reference = attempt && functionalReferences[functionalReferenceKey(attempt.exercise, attempt.prompt)];
+  const canSetReference = attempt?.source === "auto" && functionalLastSignature?.at === attempt.at && functionalLastSignature?.exercise === attempt.exercise && functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]).includes(attempt.prompt);
+  document.getElementById("functional-set-reference").disabled = !canSetReference;
+  const value = document.getElementById("functional-score");
+  const detail = document.getElementById("functional-score-detail");
+  value.textContent = Number.isFinite(attempt?.score) && reference && reference.basedOn !== attempt.at ? `${attempt.score}/100` : "—";
+  if (!attempt) detail.textContent = "Grave uma tentativa e escolha uma referência para esta frase.";
+  else if (reference?.basedOn === attempt.at) detail.textContent = "Esta tentativa é sua referência. A próxima receberá nota.";
+  else if (Number.isFinite(attempt.score) && reference) detail.textContent = "Semelhança com sua referência pessoal da mesma frase; não é nota de compreensão.";
+  else if (attempt.source === "manual") detail.textContent = "Correções manuais de contagem não recebem nota de áudio.";
+  else if (reference) detail.textContent = "Esta tentativa não teve áudio suficiente para comparação.";
+  else if (canSetReference) detail.textContent = "Escolha esta tentativa como referência para esta frase.";
+  else detail.textContent = "Sem áudio suficiente para referência. Faça outra tentativa.";
+}
+
+function functionalSetReference() {
+  const index = functionalLastAttemptIndex();
+  if (index < 0) return;
+  const attempt = functionalAttempts[index];
+  const candidate = functionalLastSignature;
+  if (!candidate || candidate.at !== attempt.at || candidate.exercise !== attempt.exercise || candidate.prompt !== attempt.prompt) return;
+  const key = functionalReferenceKey(attempt.exercise, attempt.prompt);
+  const updated = { ...functionalReferences, [key]: { ...candidate.signature, basedOn: attempt.at } };
+  if (!functionalPersist(FUNCTIONAL_REFERENCES_STORAGE, updated)) return;
+  functionalReferences = updated;
+  if (attempt.score != null) {
+    const revised = functionalAttempts.map((item, itemIndex) => itemIndex === index ? { ...item, score: null } : item);
+    if (functionalPersist(FUNCTIONAL_STORAGE, revised)) functionalAttempts = revised;
+  }
+  const prompts = functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]);
+  functionalPromptIndex = Math.max(0, prompts.indexOf(attempt.prompt));
+  functionalRenderExercise();
+  functionalRenderHistory();
+  functionalMessage("Referência pessoal salva. A próxima tentativa desta frase receberá nota automática.");
 }
 
 function functionalRenderHistory() {
@@ -411,6 +538,8 @@ function functionalRenderHistory() {
   const hasCurrentAttempt = functionalLastAttemptIndex() >= 0;
   document.getElementById("functional-save-review").disabled = !hasCurrentAttempt;
   document.getElementById("functional-undo-attempt").disabled = !hasCurrentAttempt;
+  document.getElementById("functional-repeat-prompt").disabled = !hasCurrentAttempt || !functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]).includes(functionalAttempts[functionalLastAttemptIndex()].prompt);
+  functionalRenderScore();
   const history = document.getElementById("functional-history");
   history.replaceChildren();
   if (!functionalAttempts.length) {
@@ -425,9 +554,11 @@ function functionalRenderHistory() {
     title.textContent = FUNCTIONAL_EXERCISES.find(exercise => exercise.id === item.exercise)?.name || item.exercise;
     const meta = document.createElement("span");
     const details = [new Date(item.at).toLocaleDateString("pt-BR")];
+    if (item.prompt) details.push(item.prompt);
     if (item.source === "auto") details.push("som detectado");
     if (item.source === "manual") details.push("contagem corrigida");
     if (item.voicedMs != null) details.push(`${(item.voicedMs / 1000).toFixed(1).replace(".", ",")} s de som`);
+    if (Number.isFinite(item.score) && functionalReferences[functionalReferenceKey(item.exercise, item.prompt)]?.basedOn !== item.at) details.push(`semelhança ${item.score}/100`);
     if (item.clarity != null) details.push(`clareza ${item.clarity}/10`);
     if (item.effort != null) details.push(`esforço ${item.effort}/10`);
     meta.textContent = details.join(" · ");
@@ -505,10 +636,12 @@ function functionalInit() {
   functionalAttempts = functionalRead(FUNCTIONAL_STORAGE, []);
   functionalBaselines = functionalRead(FUNCTIONAL_BASELINE_STORAGE, []);
   functionalTargets = functionalRead(FUNCTIONAL_TARGETS_STORAGE, { words: [], phrases: [] });
+  functionalReferences = functionalRead(FUNCTIONAL_REFERENCES_STORAGE, {});
   if (!Array.isArray(functionalAttempts)) functionalAttempts = [];
   if (!Array.isArray(functionalBaselines)) functionalBaselines = [];
   if (!Array.isArray(functionalTargets.words)) functionalTargets.words = [];
   if (!Array.isArray(functionalTargets.phrases)) functionalTargets.phrases = functionalTargets.phrase ? [functionalTargets.phrase] : [];
+  if (!functionalReferences || typeof functionalReferences !== "object" || Array.isArray(functionalReferences)) functionalReferences = {};
   for (const exercise of FUNCTIONAL_EXERCISES) selector.add(new Option(exercise.name, exercise.id));
   document.getElementById("functional-words").value = functionalTargets.words.join("\n");
   document.getElementById("functional-phrase").value = functionalTargets.phrases.join("\n");
@@ -549,6 +682,8 @@ function functionalInit() {
   document.getElementById("functional-save-review").addEventListener("click", functionalSaveReview);
   document.getElementById("functional-add-attempt").addEventListener("click", () => functionalCountAttempt("manual"));
   document.getElementById("functional-undo-attempt").addEventListener("click", functionalUndoAttempt);
+  document.getElementById("functional-repeat-prompt").addEventListener("click", functionalRepeatPrompt);
+  document.getElementById("functional-set-reference").addEventListener("click", functionalSetReference);
   document.getElementById("functional-baseline").addEventListener("submit", functionalSaveBaseline);
   for (const field of ["clarity", "effort"]) {
     document.getElementById(`functional-${field}`).addEventListener("input", event => {
