@@ -78,6 +78,14 @@ let functionalTimer = null;
 let functionalTimerEnd = 0;
 let functionalRecorder = null;
 let functionalStream = null;
+let functionalAudioContext = null;
+let functionalMonitor = null;
+let functionalListening = false;
+let functionalStarting = false;
+let functionalStartToken = 0;
+let functionalNoiseFloor = 0.002;
+let functionalSegment = null;
+let functionalLastSampleAt = 0;
 let functionalAudio = new Map();
 
 function functionalRead(key, fallback) {
@@ -155,6 +163,7 @@ function functionalSelect(index) {
   functionalIndex = (index + FUNCTIONAL_EXERCISES.length) % FUNCTIONAL_EXERCISES.length;
   functionalPromptIndex = 0;
   functionalRenderExercise();
+  functionalRenderHistory();
   functionalMessage("Faça pausas sempre que precisar.");
 }
 
@@ -181,81 +190,227 @@ function functionalRenderAudio() {
   }
 }
 
-async function functionalStartRecording() {
-  if (functionalRecorder || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-    functionalMessage("A gravação não está disponível neste navegador. Você ainda pode registrar a prática.");
-    return;
+function functionalLastAttemptIndex() {
+  const today = new Date().toLocaleDateString("sv-SE");
+  for (let index = functionalAttempts.length - 1; index >= 0; index--) {
+    const item = functionalAttempts[index];
+    if (item.exercise === FUNCTIONAL_EXERCISES[functionalIndex].id && new Date(item.at).toLocaleDateString("sv-SE") === today) return index;
   }
-  try {
-    if (typeof modelListening !== "undefined" && modelListening) stopRecognition();
-    if (typeof tongueState !== "undefined" && tongueState.listening) stopPronunciation();
-    functionalStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    const preferred = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find(type => MediaRecorder.isTypeSupported?.(type));
-    functionalRecorder = new MediaRecorder(functionalStream, preferred ? { mimeType: preferred } : undefined);
-    const version = document.getElementById("functional-version").value;
-    const exerciseId = FUNCTIONAL_EXERCISES[functionalIndex].id;
-    const chunks = [];
-    functionalRecorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
-    functionalRecorder.onstop = () => {
-      functionalStream?.getTracks().forEach(track => track.stop());
-      functionalStream = null;
-      functionalRecorder = null;
-      document.getElementById("functional-record").disabled = false;
-      document.getElementById("functional-stop").disabled = true;
-      if (!chunks.length) {
-        functionalMessage("O áudio ficou vazio. Tente gravar novamente.");
-        return;
-      }
-      const blob = new Blob(chunks, { type: preferred || chunks[0].type || "audio/mp4" });
-      const key = `${exerciseId}:${version}`;
-      const previous = functionalAudio.get(key);
-      if (previous) URL.revokeObjectURL(previous.url);
-      functionalAudio.set(key, { url: URL.createObjectURL(blob), extension: blob.type.includes("webm") ? "webm" : "m4a" });
-      functionalRenderAudio();
-      functionalMessage("Gravação pronta para ouvir ou baixar.");
-    };
-    functionalRecorder.onerror = () => functionalMessage("A gravação falhou. Você pode registrar a tentativa sem áudio.");
-    functionalRecorder.start();
-    document.getElementById("functional-record").disabled = true;
-    document.getElementById("functional-stop").disabled = false;
-    functionalMessage("Gravando. Toque em Parar quando terminar.");
-  } catch (error) {
-    functionalStream?.getTracks().forEach(track => track.stop());
-    functionalStream = null;
-    functionalRecorder = null;
-    functionalMessage(`Não foi possível gravar (${error.name || "microfone indisponível"}). Verifique a permissão do microfone.`);
-  }
+  return -1;
 }
 
-function functionalStopRecording() {
-  if (functionalRecorder?.state === "recording") functionalRecorder.stop();
-}
-
-function functionalSaveAttempt() {
-  functionalStopRecording();
+function functionalCountAttempt(source, voicedMs = null) {
   const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
   const attempt = {
     at: new Date().toISOString(),
     exercise: exercise.id,
     prompt: functionalPrompts(exercise)[functionalPromptIndex],
-    clarity: Number(document.getElementById("functional-clarity").value),
-    effort: Number(document.getElementById("functional-effort").value),
-    note: document.getElementById("functional-note").value.trim()
+    source,
+    voicedMs,
+    clarity: null,
+    effort: null,
+    note: ""
   };
   const next = [...functionalAttempts, attempt];
-  if (!functionalPersist(FUNCTIONAL_STORAGE, next)) return;
+  if (!functionalPersist(FUNCTIONAL_STORAGE, next)) return false;
   functionalAttempts = next;
-  document.getElementById("functional-note").value = "";
   const prompts = functionalPrompts(exercise);
   functionalPromptIndex = (functionalPromptIndex + 1) % prompts.length;
   functionalRenderExercise();
   functionalRenderHistory();
-  functionalMessage("Tentativa registrada. Você pode continuar, descansar ou mudar de foco.");
+  functionalMessage(source === "auto" ? "Tentativa contada automaticamente. Continue ou faça uma pausa." : "Contagem corrigida.");
+  return true;
+}
+
+function functionalFinishSegment() {
+  const segment = functionalSegment;
+  functionalSegment = null;
+  if (!segment) return;
+  const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
+  const minimumMs = exercise.id === "transferencia" ? 1800 : ["respiracao", "voz"].includes(exercise.id) ? 500 : 250;
+  if (segment.voicedMs >= minimumMs) functionalCountAttempt("auto", Math.round(segment.voicedMs));
+  document.getElementById("functional-live").textContent = functionalListening ? "Aguardando sua voz" : "Microfone desligado";
+}
+
+function functionalObserveAudio(analyser) {
+  const samples = new Uint8Array(analyser.fftSize);
+  functionalMonitor = setInterval(() => {
+    if (!functionalListening) return;
+    analyser.getByteTimeDomainData(samples);
+    let power = 0;
+    for (const sample of samples) power += ((sample - 128) / 128) ** 2;
+    const rms = Math.sqrt(power / samples.length);
+    const now = performance.now();
+    const elapsed = functionalLastSampleAt ? Math.min(150, now - functionalLastSampleAt) : 70;
+    functionalLastSampleAt = now;
+    document.getElementById("functional-level-bar").style.width = `${Math.min(100, Math.round(rms / 0.08 * 100))}%`;
+    const threshold = Math.max(0.004, functionalNoiseFloor * 2);
+    if (rms >= threshold) {
+      if (!functionalSegment) {
+        functionalSegment = { voicedMs: 0, lastSoundAt: now };
+        document.getElementById("functional-live").textContent = "Som captado";
+      }
+      functionalSegment.voicedMs += elapsed;
+      functionalSegment.lastSoundAt = now;
+    } else if (functionalSegment) {
+      const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
+      const gapMs = exercise.id === "transferencia" ? 5000 : ["ritmo", "prosodia", "voz"].includes(exercise.id) ? 1500 : 1000;
+      if (now - functionalSegment.lastSoundAt >= gapMs) functionalFinishSegment();
+    } else {
+      functionalNoiseFloor = functionalNoiseFloor * 0.98 + rms * 0.02;
+    }
+  }, 70);
+}
+
+async function functionalStartRecording() {
+  if (functionalListening || functionalStarting) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    functionalMessage("Microfone indisponível. Abra o site em HTTPS e permita o acesso ao microfone.");
+    return;
+  }
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    functionalMessage("Este navegador não oferece a escuta necessária para contar as tentativas.");
+    return;
+  }
+  const token = ++functionalStartToken;
+  functionalStarting = true;
+  document.getElementById("functional-record").disabled = true;
+  functionalMessage("Abrindo o microfone…");
+  let context = null;
+  let stream = null;
+  try {
+    if (typeof modelListening !== "undefined" && modelListening) stopRecognition();
+    if (typeof tongueState !== "undefined" && tongueState.listening) stopPronunciation();
+    context = new AudioContextClass();
+    const resume = context.resume().catch(error => error);
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 }, video: false });
+    const resumeError = await resume;
+    if (resumeError) throw resumeError;
+    if (token !== functionalStartToken) {
+      stream.getTracks().forEach(track => track.stop());
+      await context.close();
+      return;
+    }
+    functionalStream = stream;
+    functionalAudioContext = context;
+    const source = context.createMediaStreamSource(stream);
+    const filter = context.createBiquadFilter();
+    filter.type = "highpass";
+    filter.frequency.value = 90;
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(filter);
+    filter.connect(analyser);
+    functionalNoiseFloor = 0.002;
+    functionalSegment = null;
+    functionalLastSampleAt = 0;
+    functionalListening = true;
+    functionalObserveAudio(analyser);
+    stream.getAudioTracks()[0]?.addEventListener("ended", () => {
+      if (functionalListening) {
+        functionalStopRecording();
+        functionalMessage("O microfone foi interrompido. Inicie a escuta novamente.");
+      }
+    });
+
+    if (window.MediaRecorder) {
+      try {
+        const preferred = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find(type => MediaRecorder.isTypeSupported?.(type));
+        const recorder = new MediaRecorder(stream, preferred ? { mimeType: preferred } : undefined);
+        const version = document.getElementById("functional-version").value;
+        const exerciseId = FUNCTIONAL_EXERCISES[functionalIndex].id;
+        const chunks = [];
+        recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
+        recorder.onstop = () => {
+          if (functionalRecorder === recorder) functionalRecorder = null;
+          if (!chunks.length) return;
+          const blob = new Blob(chunks, { type: preferred || chunks[0].type || "audio/mp4" });
+          const key = `${exerciseId}:${version}`;
+          const previous = functionalAudio.get(key);
+          if (previous) URL.revokeObjectURL(previous.url);
+          functionalAudio.set(key, { url: URL.createObjectURL(blob), extension: blob.type.includes("webm") ? "webm" : "m4a" });
+          functionalRenderAudio();
+        };
+        recorder.start();
+        functionalRecorder = recorder;
+      } catch (error) {
+        functionalRecorder = null;
+      }
+    }
+    document.getElementById("functional-stop").disabled = false;
+    document.getElementById("functional-live").textContent = "Aguardando sua voz";
+    functionalMessage("Escutando e contando as tentativas automaticamente.");
+  } catch (error) {
+    if (functionalListening) functionalStopRecording();
+    else {
+      stream?.getTracks().forEach(track => track.stop());
+      if (context?.state !== "closed") context?.close().catch(() => {});
+      functionalStream = null;
+      functionalAudioContext = null;
+    }
+    functionalMessage(`Não foi possível iniciar a escuta (${error.name || "microfone indisponível"}). Verifique a permissão do microfone.`);
+  } finally {
+    if (token === functionalStartToken) {
+      functionalStarting = false;
+      document.getElementById("functional-record").disabled = functionalListening;
+    }
+  }
+}
+
+function functionalStopRecording() {
+  functionalStartToken++;
+  functionalStarting = false;
+  functionalListening = false;
+  if (functionalMonitor) clearInterval(functionalMonitor);
+  functionalMonitor = null;
+  functionalFinishSegment();
+  if (functionalRecorder?.state === "recording") functionalRecorder.stop();
+  functionalStream?.getTracks().forEach(track => track.stop());
+  functionalStream = null;
+  if (functionalAudioContext?.state !== "closed") functionalAudioContext?.close().catch(() => {});
+  functionalAudioContext = null;
+  functionalLastSampleAt = 0;
+  document.getElementById("functional-record").disabled = false;
+  document.getElementById("functional-stop").disabled = true;
+  document.getElementById("functional-level-bar").style.width = "0%";
+  document.getElementById("functional-live").textContent = "Microfone desligado";
+}
+
+function functionalSaveReview() {
+  const index = functionalLastAttemptIndex();
+  if (index < 0) return;
+  const updated = functionalAttempts.map((attempt, itemIndex) => itemIndex === index ? {
+    ...attempt,
+    clarity: Number(document.getElementById("functional-clarity").value),
+    effort: Number(document.getElementById("functional-effort").value),
+    note: document.getElementById("functional-note").value.trim()
+  } : attempt);
+  if (!functionalPersist(FUNCTIONAL_STORAGE, updated)) return;
+  functionalAttempts = updated;
+  document.getElementById("functional-note").value = "";
+  functionalRenderHistory();
+  functionalMessage("Sua avaliação foi adicionada à tentativa mais recente deste foco.");
+}
+
+function functionalUndoAttempt() {
+  const index = functionalLastAttemptIndex();
+  if (index < 0) return;
+  const updated = functionalAttempts.filter((_, itemIndex) => itemIndex !== index);
+  if (!functionalPersist(FUNCTIONAL_STORAGE, updated)) return;
+  functionalAttempts = updated;
+  functionalRenderHistory();
+  functionalMessage("Última tentativa deste foco removida.");
 }
 
 function functionalRenderHistory() {
   const today = new Date().toLocaleDateString("sv-SE");
-  document.getElementById("functional-today-count").textContent = functionalAttempts.filter(item => item.at && new Date(item.at).toLocaleDateString("sv-SE") === today).length;
+  const todayAttempts = functionalAttempts.filter(item => item.at && new Date(item.at).toLocaleDateString("sv-SE") === today);
+  document.getElementById("functional-today-count").textContent = todayAttempts.length;
+  document.getElementById("functional-exercise-count").textContent = todayAttempts.filter(item => item.exercise === FUNCTIONAL_EXERCISES[functionalIndex].id).length;
+  const hasCurrentAttempt = functionalLastAttemptIndex() >= 0;
+  document.getElementById("functional-save-review").disabled = !hasCurrentAttempt;
+  document.getElementById("functional-undo-attempt").disabled = !hasCurrentAttempt;
   const history = document.getElementById("functional-history");
   history.replaceChildren();
   if (!functionalAttempts.length) {
@@ -269,7 +424,13 @@ function functionalRenderHistory() {
     const title = document.createElement("strong");
     title.textContent = FUNCTIONAL_EXERCISES.find(exercise => exercise.id === item.exercise)?.name || item.exercise;
     const meta = document.createElement("span");
-    meta.textContent = `${new Date(item.at).toLocaleDateString("pt-BR")} · clareza ${item.clarity}/10 · esforço ${item.effort}/10`;
+    const details = [new Date(item.at).toLocaleDateString("pt-BR")];
+    if (item.source === "auto") details.push("som detectado");
+    if (item.source === "manual") details.push("contagem corrigida");
+    if (item.voicedMs != null) details.push(`${(item.voicedMs / 1000).toFixed(1).replace(".", ",")} s de som`);
+    if (item.clarity != null) details.push(`clareza ${item.clarity}/10`);
+    if (item.effort != null) details.push(`esforço ${item.effort}/10`);
+    meta.textContent = details.join(" · ");
     row.append(title, meta);
     history.appendChild(row);
   }
@@ -385,7 +546,9 @@ function functionalInit() {
   });
   document.getElementById("functional-record").addEventListener("click", functionalStartRecording);
   document.getElementById("functional-stop").addEventListener("click", functionalStopRecording);
-  document.getElementById("functional-save-attempt").addEventListener("click", functionalSaveAttempt);
+  document.getElementById("functional-save-review").addEventListener("click", functionalSaveReview);
+  document.getElementById("functional-add-attempt").addEventListener("click", () => functionalCountAttempt("manual"));
+  document.getElementById("functional-undo-attempt").addEventListener("click", functionalUndoAttempt);
   document.getElementById("functional-baseline").addEventListener("submit", functionalSaveBaseline);
   for (const field of ["clarity", "effort"]) {
     document.getElementById(`functional-${field}`).addEventListener("input", event => {
@@ -394,8 +557,10 @@ function functionalInit() {
   }
   window.addEventListener("pagehide", () => {
     functionalStopRecording();
-    functionalStream?.getTracks().forEach(track => track.stop());
     for (const audio of functionalAudio.values()) URL.revokeObjectURL(audio.url);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && (functionalListening || functionalStarting)) functionalStopRecording();
   });
   functionalResetTimer();
   functionalRenderExercise();

@@ -9,7 +9,7 @@
 
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=20260923-1">
+  <link rel="stylesheet" href="styles.css?v=20260923-2">
 </head>
 <body>
   <header class="site-header">
@@ -231,7 +231,7 @@
         <div>
           <span class="eyebrow">Prática de fala</span>
           <h2 id="functional-title">Treino funcional</h2>
-          <p>Escolha um foco, pratique no seu ritmo e registre como a fala funcionou para você.</p>
+          <p>Escolha um foco e inicie a escuta. O app conta as tentativas conforme você fala e faz pausas.</p>
         </div>
         <div class="functional-today" aria-live="polite"><strong id="functional-today-count">0</strong><span>tentativas hoje</span></div>
       </div>
@@ -245,12 +245,21 @@
             <select id="functional-duration"><option value="2">2 min</option><option value="3" selected>3 min</option><option value="4">4 min</option><option value="5">5 min</option></select>
           </div>
           <div class="functional-block-head">
-            <div><span id="functional-step" class="eyebrow">1 de 8</span><h3 id="functional-name"></h3></div>
+            <div><span id="functional-step" class="eyebrow">1 de 9</span><h3 id="functional-name"></h3></div>
             <strong id="functional-clock" aria-live="off">03:00</strong>
           </div>
           <p id="functional-instruction" class="functional-instruction"></p>
           <div id="functional-prompt" class="functional-prompt" aria-live="polite"></div>
           <p id="functional-guidance" class="functional-guidance"></p>
+          <div class="functional-live-count" aria-live="polite">
+            <div><span>Tentativas deste foco hoje</span><strong id="functional-exercise-count">0</strong></div>
+            <div class="functional-level" aria-hidden="true"><span id="functional-level-bar"></span></div>
+            <span id="functional-live">Microfone desligado</span>
+          </div>
+          <div class="functional-actions functional-listen-actions">
+            <button id="functional-record" type="button" class="functional-primary">Iniciar escuta</button>
+            <button id="functional-stop" type="button" class="functional-secondary" disabled>Parar escuta</button>
+          </div>
           <div class="functional-controls functional-targets">
             <label for="functional-words">Minhas palavras difíceis <small>(uma por linha)</small></label>
             <textarea id="functional-words" rows="3" placeholder="Ex.: neurologia"></textarea>
@@ -268,15 +277,11 @@
         </div>
 
         <div class="functional-review">
-          <h3>Ouça sua tentativa</h3>
+          <h3>Gravação e revisão</h3>
           <label for="functional-version">Versão</label>
           <select id="functional-version"><option value="habitual">Habitual</option><option value="clara">Clara</option></select>
-          <div class="functional-actions">
-            <button id="functional-record" type="button" class="functional-primary">Gravar</button>
-            <button id="functional-stop" type="button" class="functional-secondary" disabled>Parar</button>
-          </div>
           <div id="functional-audio-list"></div>
-          <p class="functional-guidance">Os áudios ficam apenas nesta visita. Baixe os que deseja guardar antes de fechar o site.</p>
+          <p class="functional-guidance">A contagem é automática após iniciar a escuta. Se o navegador permitir gravar, o áudio fica apenas nesta visita; baixe-o para guardar.</p>
           <div class="functional-ratings">
             <label for="functional-clarity">Clareza percebida (0–10)</label>
             <input id="functional-clarity" type="range" min="0" max="10" value="5">
@@ -287,8 +292,9 @@
           </div>
           <label for="functional-note">O que ajudou?</label>
           <textarea id="functional-note" rows="2" maxlength="300" placeholder="Ex.: fazer uma pausa antes da frase"></textarea>
-          <button id="functional-save-attempt" type="button" class="functional-primary functional-save">Registrar tentativa</button>
-          <p class="functional-guidance">Seu registro vale mesmo sem gravação ou transcrição. A pontuação do modelo não avalia estes exercícios.</p>
+          <button id="functional-save-review" type="button" class="functional-secondary functional-save">Salvar minha avaliação</button>
+          <div class="functional-correction" aria-label="Corrigir contagem"><button id="functional-add-attempt" type="button" class="functional-secondary">+1 tentativa</button><button id="functional-undo-attempt" type="button" class="functional-secondary">Desfazer última</button></div>
+          <p class="functional-guidance">A escuta detecta atividade sonora, não avalia se a palavra saiu correta. A avaliação de clareza é sua.</p>
         </div>
       </div>
 
@@ -452,6 +458,6 @@
   <script src="/vendor/tf-1.7.4.min.js?v=20260728-1"></script>
   <script src="/vendor/speech-commands.min.js?v=20260728-1"></script>
   <script src="script.js?v=20260923-1"></script>
-  <script src="functional-training.js?v=20260923-1"></script>
+  <script src="functional-training.js?v=20260923-2"></script>
 </body>
 </html>
