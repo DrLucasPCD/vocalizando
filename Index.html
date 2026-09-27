@@ -9,7 +9,7 @@
 
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=20260924-1">
+  <link rel="stylesheet" href="styles.css?v=20260927-1">
 </head>
 <body>
   <header class="site-header">
@@ -81,6 +81,7 @@
           <p id="twister-text" class="twister-text">O rato roeu a roupa do rei de Roma.</p>
           <div class="challenge-actions">
             <button id="hear-twister" type="button" class="outline-button"><span aria-hidden="true">◖))</span> Ouvir exemplo</button>
+            <button type="button" class="outline-button" data-explanation="trava">Ouvir explicação</button>
             <button id="record-twister" type="button" class="record-button"><span class="mic-shape" aria-hidden="true"></span> Gravar minha voz</button>
           </div>
           <div class="audio-controls" aria-label="Controles do exemplo em áudio">
@@ -175,6 +176,7 @@
           <div><span>Status</span><strong id="guide-status">Pronto</strong></div>
         </div>
         <button id="guide-start" type="button" class="compact-action">Começar treino guiado</button>
+        <div class="voice-actions"><button type="button" class="functional-secondary" data-explanation="tara">Ouvir Tá Rá Lá</button><button type="button" class="functional-secondary" data-explanation="iii">Ouvir III</button></div>
       </section>
 
       <section class="permission-panel" aria-label="Permissões do dispositivo">
@@ -190,7 +192,7 @@
           <p class="last">Último reconhecimento: <b id="last-label">—</b></p>
         </div>
         <div class="confidence-meter">
-          <div class="meter-head"><span>Precisão do modelo</span><strong id="conf-value">0%</strong></div>
+          <div class="meter-head"><span>Confiança do modelo</span><strong id="conf-value">0%</strong></div>
           <div class="meter-bar"><div id="conf-bar"></div></div>
         </div>
       </section>
@@ -249,8 +251,11 @@
             <strong id="functional-clock" aria-live="off">03:00</strong>
           </div>
           <p id="functional-instruction" class="functional-instruction"></p>
+          <button id="functional-hear-explanation" type="button" class="functional-secondary">Ouvir explicação</button>
           <div id="functional-prompt" class="functional-prompt" aria-live="polite"></div>
-          <button id="functional-repeat-prompt" type="button" class="functional-secondary functional-repeat-prompt" disabled>Repetir última frase</button>
+          <div class="functional-prompt-actions"><button id="functional-hear-prompt" type="button" class="functional-secondary">Ouvir frase</button><button id="functional-repeat-prompt" type="button" class="functional-secondary" disabled>Frase anterior</button><button id="functional-next-prompt" type="button" class="functional-secondary">Próxima frase</button></div>
+          <audio id="functional-voice-player" controls hidden></audio>
+          <p id="voice-status" class="voice-status" role="status" aria-live="polite"></p>
           <p id="functional-guidance" class="functional-guidance"></p>
           <div class="functional-live-count" aria-live="polite">
             <div><span>Tentativas deste foco hoje</span><strong id="functional-exercise-count">0</strong></div>
@@ -299,8 +304,14 @@
           <label for="functional-note">O que ajudou?</label>
           <textarea id="functional-note" rows="2" maxlength="300" placeholder="Ex.: fazer uma pausa antes da frase"></textarea>
           <button id="functional-save-review" type="button" class="functional-secondary functional-save">Salvar minha avaliação</button>
+          <div class="functional-listener-review">
+            <label for="functional-listener-result">O que outra pessoa entendeu, sem ver a frase?</label>
+            <select id="functional-listener-result"><option value="">Selecione</option><option value="all">A frase toda</option><option value="part">Uma parte</option><option value="none">Não entendeu</option></select>
+            <label class="functional-consent"><input id="functional-consent-features" type="checkbox"> Usar as características acústicas desta tentativa para personalizar a comparação neste navegador</label>
+            <button id="functional-save-listener" type="button" class="functional-secondary" disabled>Salvar retorno do ouvinte</button>
+          </div>
           <div class="functional-correction" aria-label="Corrigir contagem"><button id="functional-add-attempt" type="button" class="functional-secondary">+1 tentativa</button><button id="functional-undo-attempt" type="button" class="functional-secondary">Desfazer última</button></div>
-          <p class="functional-guidance">A nota compara sua fala com uma referência sua da mesma frase. Não mede se as palavras foram entendidas nem substitui a avaliação de um ouvinte.</p>
+          <p class="functional-guidance">A nota compara o som com uma referência sua. O retorno do ouvinte fica separado. Nenhum áudio é enviado ou salvo automaticamente.</p>
         </div>
       </div>
 
@@ -344,8 +355,8 @@
 
       <div class="report-summary">
         <article class="overall-card">
-          <div id="overall-ring" class="overall-ring"><div><strong id="overall-score">0</strong><span>/100</span></div></div>
-          <div><span class="card-label">Desempenho geral</span><h3 id="overall-title">Comece seu treino</h3><p id="overall-copy">Conclua repetições ou grave um trava-língua para gerar sua análise.</p></div>
+          <div id="overall-ring" class="overall-ring"><div><strong id="overall-score">0</strong><span>/4</span></div></div>
+          <div><span class="card-label">Atividades de hoje</span><h3 id="overall-title">Comece seu treino</h3><p id="overall-copy">Repetições, trava-línguas e treino funcional aparecem separadamente abaixo.</p></div>
         </article>
         <article class="next-focus-card">
           <span class="card-label">Próximo foco</span><div class="focus-icon" aria-hidden="true">↗</div>
@@ -358,22 +369,23 @@
         <article class="performance-card">
           <div class="performance-head"><div><span class="exercise-tag">Articulação</span><h3>Tá Rá Lá</h3></div><strong id="report-tara-score" class="performance-score">0</strong></div>
           <div class="performance-bar"><span id="report-tara-bar"></span></div>
-          <dl class="performance-details"><div><dt>Repetições</dt><dd id="report-tara-reps">0 de 15</dd></div><div><dt>Precisão média</dt><dd id="report-tara-confidence">—</dd></div></dl>
+          <dl class="performance-details"><div><dt>Repetições</dt><dd id="report-tara-reps">0 de 15</dd></div><div><dt>Confiança média do modelo</dt><dd id="report-tara-confidence">—</dd></div></dl>
           <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-tara-tip">Inicie o reconhecimento para avaliarmos sua articulação.</span></p></div>
         </article>
         <article class="performance-card">
           <div class="performance-head"><div><span class="exercise-tag alt">Sustentação</span><h3>III</h3></div><strong id="report-iii-score" class="performance-score">0</strong></div>
           <div class="performance-bar"><span id="report-iii-bar"></span></div>
-          <dl class="performance-details"><div><dt>Repetições</dt><dd id="report-iii-reps">0 de 20</dd></div><div><dt>Precisão média</dt><dd id="report-iii-confidence">—</dd></div></dl>
+          <dl class="performance-details"><div><dt>Repetições</dt><dd id="report-iii-reps">0 de 20</dd></div><div><dt>Confiança média do modelo</dt><dd id="report-iii-confidence">—</dd></div></dl>
           <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-iii-tip">Inicie o reconhecimento para avaliarmos sua sustentação.</span></p></div>
         </article>
         <article class="performance-card">
-          <div class="performance-head"><div><span class="exercise-tag challenge">Dicção</span><h3>Trava-línguas</h3></div><strong id="report-twister-score" class="performance-score">0</strong></div>
+          <div class="performance-head"><div><span class="exercise-tag challenge">Dicção</span><h3>Trava-línguas</h3></div><strong id="report-twister-score" class="performance-score">—</strong></div>
           <div class="performance-bar"><span id="report-twister-bar"></span></div>
-          <dl class="performance-details"><div><dt>Tentativas</dt><dd id="report-twister-attempts">0 hoje</dd></div><div><dt>Melhor nota</dt><dd id="report-twister-best">—</dd></div></dl>
+          <dl class="performance-details"><div><dt>Tentativas</dt><dd id="report-twister-attempts">0 hoje</dd></div><div><dt>Melhor correspondência da transcrição</dt><dd id="report-twister-best">—</dd></div></dl>
           <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-twister-tip">Grave um desafio para receber uma orientação de dicção.</span></p></div>
         </article>
       </div>
+      <p id="report-functional-summary" class="report-functional-summary">Treino funcional: nenhuma tentativa registrada hoje.</p>
 
       <article class="weekly-card">
         <div class="weekly-head"><div><span class="card-label">Últimos 7 dias</span><h3>Constância de treino</h3></div><p><strong id="weekly-active-days">0</strong> dias ativos</p></div>
@@ -387,8 +399,8 @@
       </article>
 
       <section class="data-panel" aria-label="Seus dados">
-        <div><span class="card-label">Dados no dispositivo</span><h3>Exportar ou apagar histórico</h3><p>Os registros ficam neste navegador. Exporte uma cópia antes de apagar.</p></div>
-        <div class="data-actions"><button id="export-data" type="button">Exportar dados</button><button id="delete-data" type="button" class="danger-action">Apagar meus dados</button></div>
+        <div><span class="card-label">Dados no dispositivo</span><h3>Backup do histórico</h3><p>Exporte para guardar uma cópia ou importe um backup deste app. A importação substitui os dados atuais. O arquivo pode incluir características da voz que você autorizou salvar; guarde-o com cuidado. Áudios baixados ficam separados.</p><p id="data-status" role="status"></p></div>
+        <div class="data-actions"><button id="export-data" type="button">Exportar dados</button><button id="import-data" type="button">Importar backup</button><input id="import-file" type="file" accept="application/json,.json" hidden><button id="delete-data" type="button" class="danger-action">Apagar meus dados</button></div>
       </section>
     </section>
 
@@ -463,7 +475,8 @@
   <script src="/audio-context-fix.js?v=20260728-1"></script>
   <script src="/vendor/tf-1.7.4.min.js?v=20260728-1"></script>
   <script src="/vendor/speech-commands.min.js?v=20260728-1"></script>
-  <script src="script.js?v=20260923-1"></script>
-  <script src="functional-training.js?v=20260924-1"></script>
+  <script src="voice-playback.js?v=20260927-2"></script>
+  <script src="script.js?v=20260927-2"></script>
+  <script src="functional-training.js?v=20260927-2"></script>
 </body>
 </html>

@@ -114,6 +114,15 @@ function functionalMessage(message) {
   document.getElementById("functional-status").textContent = message;
 }
 
+function functionalMicStatus(label, active = false) {
+  document.getElementById("functional-live").textContent = label;
+  const mic = document.getElementById("mic-indicator");
+  if (mic && (active || !(typeof modelListening !== "undefined" && modelListening) && !(typeof tongueState !== "undefined" && tongueState.listening))) {
+    mic.classList.toggle("on", active);
+    mic.querySelector(".label").textContent = active ? "Ouvindo treino funcional" : label;
+  }
+}
+
 function functionalPrompts(exercise) {
   if (exercise.id === "articulacao" && functionalTargets.words.length) {
     return functionalTargets.words.flatMap(word => [word, `Use "${word}" em uma frase curta.`]);
@@ -157,10 +166,25 @@ function functionalRenderExercise() {
   document.getElementById("functional-guidance").textContent = exercise.guidance;
   document.getElementById("functional-prev").disabled = functionalIndex === 0;
   document.getElementById("functional-next").textContent = functionalIndex === FUNCTIONAL_EXERCISES.length - 1 ? "Voltar ao início" : "Próximo foco";
+  document.getElementById("functional-repeat-prompt").disabled = prompts.length < 2;
+  document.getElementById("functional-next-prompt").disabled = prompts.length < 2;
+  functionalRenderRecordButton();
   functionalRenderAudio();
 }
 
+function functionalRenderRecordButton() {
+  const button = document.getElementById("functional-record");
+  if (functionalStarting) button.textContent = "Abrindo microfone…";
+  else if (functionalListening) button.textContent = "Escutando…";
+  else {
+    const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
+    const prompt = functionalPrompts(exercise)[functionalPromptIndex];
+    button.textContent = functionalAttempts.some(item => item.exercise === exercise.id && item.prompt === prompt) ? "Tentar novamente" : "Iniciar escuta";
+  }
+}
+
 function functionalSelect(index) {
+  window.vocalizandoVoice?.stop();
   functionalStopRecording();
   functionalResetTimer();
   functionalIndex = (index + FUNCTIONAL_EXERCISES.length) % FUNCTIONAL_EXERCISES.length;
@@ -195,9 +219,11 @@ function functionalRenderAudio() {
 
 function functionalLastAttemptIndex() {
   const today = new Date().toLocaleDateString("sv-SE");
+  const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
+  const prompt = functionalPrompts(exercise)[functionalPromptIndex];
   for (let index = functionalAttempts.length - 1; index >= 0; index--) {
     const item = functionalAttempts[index];
-    if (item.exercise === FUNCTIONAL_EXERCISES[functionalIndex].id && new Date(item.at).toLocaleDateString("sv-SE") === today) return index;
+    if (item.exercise === exercise.id && item.prompt === prompt && new Date(item.at).toLocaleDateString("sv-SE") === today) return index;
   }
   return -1;
 }
@@ -260,10 +286,10 @@ function functionalCountAttempt(source, voicedMs = null, signature = null) {
   if (!functionalPersist(FUNCTIONAL_STORAGE, next)) return false;
   functionalAttempts = next;
   functionalLastSignature = signature ? { at: attempt.at, exercise: exercise.id, prompt, signature } : null;
-  const prompts = functionalPrompts(exercise);
-  functionalPromptIndex = (functionalPromptIndex + 1) % prompts.length;
+  document.getElementById("functional-consent-features").checked = false;
   functionalRenderExercise();
   functionalRenderHistory();
+  if (typeof updateReport === "function") updateReport();
   functionalMessage(source === "auto"
     ? Number.isFinite(attempt.score) ? `Tentativa contada. Semelhança com sua referência: ${attempt.score} de 100.` : "Tentativa contada. Defina uma referência desta frase para receber nota."
     : "Contagem corrigida; sem nota de áudio.");
@@ -285,7 +311,7 @@ function functionalFinishSegment() {
     } : null;
     functionalCountAttempt("auto", Math.round(segment.voicedMs), signature);
   }
-  document.getElementById("functional-live").textContent = functionalListening ? "Aguardando sua voz" : "Microfone desligado";
+  functionalMicStatus(functionalListening ? "Aguardando sua voz" : "Microfone desligado", functionalListening);
 }
 
 function functionalSpectrum(analyser, frequencies, bands) {
@@ -321,7 +347,7 @@ function functionalObserveAudio(analyser) {
     if (rms >= threshold) {
       if (!functionalSegment) {
         functionalSegment = { voicedMs: 0, startedAt: now, lastSoundAt: now, frames: [] };
-        document.getElementById("functional-live").textContent = "Som captado";
+        functionalMicStatus("Som captado", true);
       }
       functionalSegment.voicedMs += elapsed;
       functionalSegment.lastSoundAt = now;
@@ -339,6 +365,7 @@ function functionalObserveAudio(analyser) {
 }
 
 async function functionalStartRecording() {
+  window.vocalizandoVoice?.stop();
   if (functionalListening || functionalStarting) return;
   if (!navigator.mediaDevices?.getUserMedia) {
     functionalMessage("Microfone indisponível. Abra o site em HTTPS e permita o acesso ao microfone.");
@@ -352,6 +379,8 @@ async function functionalStartRecording() {
   const token = ++functionalStartToken;
   functionalStarting = true;
   document.getElementById("functional-record").disabled = true;
+  functionalRenderRecordButton();
+  functionalMicStatus("Solicitando microfone");
   functionalMessage("Abrindo o microfone…");
   let context = null;
   let stream = null;
@@ -385,7 +414,7 @@ async function functionalStartRecording() {
     functionalObserveAudio(analyser);
     stream.getAudioTracks()[0]?.addEventListener("ended", () => {
       if (functionalListening) {
-        functionalStopRecording();
+        functionalStopRecording("interrupted");
         functionalMessage("O microfone foi interrompido. Inicie a escuta novamente.");
       }
     });
@@ -415,7 +444,8 @@ async function functionalStartRecording() {
       }
     }
     document.getElementById("functional-stop").disabled = false;
-    document.getElementById("functional-live").textContent = "Aguardando sua voz";
+    functionalMicStatus("Aguardando sua voz", true);
+    functionalRenderRecordButton();
     functionalMessage("Escutando e contando as tentativas automaticamente.");
   } catch (error) {
     if (functionalListening) functionalStopRecording();
@@ -425,16 +455,18 @@ async function functionalStartRecording() {
       functionalStream = null;
       functionalAudioContext = null;
     }
+    functionalMicStatus(error.name === "NotAllowedError" ? "Microfone bloqueado" : "Falha no microfone");
     functionalMessage(`Não foi possível iniciar a escuta (${error.name || "microfone indisponível"}). Verifique a permissão do microfone.`);
   } finally {
     if (token === functionalStartToken) {
       functionalStarting = false;
       document.getElementById("functional-record").disabled = functionalListening;
+      functionalRenderRecordButton();
     }
   }
 }
 
-function functionalStopRecording() {
+function functionalStopRecording(reason = "stopped") {
   functionalStartToken++;
   functionalStarting = false;
   functionalListening = false;
@@ -448,9 +480,11 @@ function functionalStopRecording() {
   functionalAudioContext = null;
   functionalLastSampleAt = 0;
   document.getElementById("functional-record").disabled = false;
+  functionalRenderRecordButton();
   document.getElementById("functional-stop").disabled = true;
   document.getElementById("functional-level-bar").style.width = "0%";
-  document.getElementById("functional-live").textContent = "Microfone desligado";
+  functionalMicStatus(reason === "background" ? "Pausado ao sair do app" : reason === "interrupted" ? "Microfone interrompido" : "Microfone desligado");
+  if (reason === "background") functionalMessage("Escuta pausada ao sair do app. Toque em Iniciar escuta para continuar.");
 }
 
 function functionalSaveReview() {
@@ -466,44 +500,102 @@ function functionalSaveReview() {
   functionalAttempts = updated;
   document.getElementById("functional-note").value = "";
   functionalRenderHistory();
-  functionalMessage("Sua avaliação foi adicionada à tentativa mais recente deste foco.");
+  functionalMessage("Sua avaliação foi adicionada à tentativa mais recente desta frase.");
+}
+
+function functionalSaveListener() {
+  const index = functionalLastAttemptIndex();
+  const result = document.getElementById("functional-listener-result").value;
+  if (index < 0 || !["all", "part", "none"].includes(result)) {
+    functionalMessage("Selecione o que o ouvinte entendeu.");
+    return;
+  }
+  const attempt = functionalAttempts[index];
+  const candidate = functionalLastSignature?.at === attempt.at ? functionalLastSignature : null;
+  const signature = candidate?.signature || attempt.listenerSignature;
+  const consent = document.getElementById("functional-consent-features").checked && !!signature;
+  const updated = functionalAttempts.map((item, itemIndex) => {
+    if (itemIndex !== index) return item;
+    const { listenerSignature, ...rest } = item;
+    return { ...rest, listenerResult: result, listenerAt: new Date().toISOString(), ...(consent ? { listenerSignature: signature } : {}) };
+  });
+  if (!functionalPersist(FUNCTIONAL_STORAGE, updated)) return;
+  functionalAttempts = updated;
+  const key = functionalReferenceKey(attempt.exercise, attempt.prompt);
+  let referenceSaved = false;
+  if (result === "all" && consent) {
+    const references = { ...functionalReferences, [key]: { ...signature, basedOn: attempt.at } };
+    if (functionalPersist(FUNCTIONAL_REFERENCES_STORAGE, references)) {
+      functionalReferences = references;
+      referenceSaved = true;
+    }
+  } else if (functionalReferences[key]?.basedOn === attempt.at) {
+    const references = { ...functionalReferences };
+    delete references[key];
+    if (functionalPersist(FUNCTIONAL_REFERENCES_STORAGE, references)) functionalReferences = references;
+  }
+  document.getElementById("functional-listener-result").value = "";
+  document.getElementById("functional-consent-features").checked = false;
+  functionalRenderHistory();
+  if (typeof updateReport === "function") updateReport();
+  functionalMessage(referenceSaved ? "Retorno salvo. Esta tentativa virou sua referência pessoal para a frase." : "Retorno do ouvinte salvo separadamente da nota acústica.");
 }
 
 function functionalUndoAttempt() {
   const index = functionalLastAttemptIndex();
   if (index < 0) return;
-  if (functionalLastSignature?.at === functionalAttempts[index].at) functionalLastSignature = null;
+  const attempt = functionalAttempts[index];
   const updated = functionalAttempts.filter((_, itemIndex) => itemIndex !== index);
   if (!functionalPersist(FUNCTIONAL_STORAGE, updated)) return;
   functionalAttempts = updated;
+  if (functionalLastSignature?.at === attempt.at) functionalLastSignature = null;
+  const key = functionalReferenceKey(attempt.exercise, attempt.prompt);
+  if (functionalReferences[key]?.basedOn === attempt.at) {
+    const references = { ...functionalReferences };
+    delete references[key];
+    if (functionalPersist(FUNCTIONAL_REFERENCES_STORAGE, references)) functionalReferences = references;
+  }
   functionalRenderHistory();
-  functionalMessage("Última tentativa deste foco removida.");
+  if (typeof updateReport === "function") updateReport();
+  functionalMessage("Última tentativa desta frase removida.");
 }
 
 function functionalRepeatPrompt() {
-  const index = functionalLastAttemptIndex();
-  if (index < 0) return;
+  window.vocalizandoVoice?.stop();
   const prompts = functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]);
-  const promptIndex = prompts.indexOf(functionalAttempts[index].prompt);
-  if (promptIndex < 0) return;
-  functionalPromptIndex = promptIndex;
+  if (prompts.length < 2) return;
+  functionalStopRecording();
+  functionalPromptIndex = (functionalPromptIndex - 1 + prompts.length) % prompts.length;
   functionalRenderExercise();
-  functionalMessage("Frase anterior selecionada para outra tentativa.");
+  functionalRenderHistory();
+  functionalMessage("Frase anterior selecionada.");
+}
+
+function functionalNextPrompt() {
+  window.vocalizandoVoice?.stop();
+  const prompts = functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]);
+  if (prompts.length < 2) return;
+  functionalStopRecording();
+  functionalPromptIndex = (functionalPromptIndex + 1) % prompts.length;
+  functionalRenderExercise();
+  functionalRenderHistory();
+  functionalMessage("Próxima frase selecionada.");
 }
 
 function functionalRenderScore() {
   const index = functionalLastAttemptIndex();
   const attempt = index >= 0 ? functionalAttempts[index] : null;
   const reference = attempt && functionalReferences[functionalReferenceKey(attempt.exercise, attempt.prompt)];
-  const canSetReference = attempt?.source === "auto" && functionalLastSignature?.at === attempt.at && functionalLastSignature?.exercise === attempt.exercise && functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]).includes(attempt.prompt);
+  const canSetReference = attempt?.source === "auto" && attempt.listenerResult !== "none" && attempt.listenerResult !== "part" && functionalLastSignature?.at === attempt.at && functionalLastSignature?.exercise === attempt.exercise && functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]).includes(attempt.prompt);
   document.getElementById("functional-set-reference").disabled = !canSetReference;
   const value = document.getElementById("functional-score");
   const detail = document.getElementById("functional-score-detail");
   value.textContent = Number.isFinite(attempt?.score) && reference && reference.basedOn !== attempt.at ? `${attempt.score}/100` : "—";
   if (!attempt) detail.textContent = "Grave uma tentativa e escolha uma referência para esta frase.";
   else if (reference?.basedOn === attempt.at) detail.textContent = "Esta tentativa é sua referência. A próxima receberá nota.";
-  else if (Number.isFinite(attempt.score) && reference) detail.textContent = "Semelhança com sua referência pessoal da mesma frase; não é nota de compreensão.";
+  else if (Number.isFinite(attempt.score) && reference) detail.textContent = attempt.listenerResult === "none" || attempt.listenerResult === "part" ? "O ouvinte não entendeu a frase toda. A nota acústica não mede compreensão." : "Semelhança com sua referência pessoal da mesma frase; não é nota de compreensão.";
   else if (attempt.source === "manual") detail.textContent = "Correções manuais de contagem não recebem nota de áudio.";
+  else if (["none", "part"].includes(attempt.listenerResult)) detail.textContent = "O ouvinte não entendeu a frase toda. Isso fica registrado sem nota automática de compreensão.";
   else if (reference) detail.textContent = "Esta tentativa não teve áudio suficiente para comparação.";
   else if (canSetReference) detail.textContent = "Escolha esta tentativa como referência para esta frase.";
   else detail.textContent = "Sem áudio suficiente para referência. Faça outra tentativa.";
@@ -514,7 +606,7 @@ function functionalSetReference() {
   if (index < 0) return;
   const attempt = functionalAttempts[index];
   const candidate = functionalLastSignature;
-  if (!candidate || candidate.at !== attempt.at || candidate.exercise !== attempt.exercise || candidate.prompt !== attempt.prompt) return;
+  if (!candidate || candidate.at !== attempt.at || candidate.exercise !== attempt.exercise || candidate.prompt !== attempt.prompt || ["none", "part"].includes(attempt.listenerResult)) return;
   const key = functionalReferenceKey(attempt.exercise, attempt.prompt);
   const updated = { ...functionalReferences, [key]: { ...candidate.signature, basedOn: attempt.at } };
   if (!functionalPersist(FUNCTIONAL_REFERENCES_STORAGE, updated)) return;
@@ -538,7 +630,9 @@ function functionalRenderHistory() {
   const hasCurrentAttempt = functionalLastAttemptIndex() >= 0;
   document.getElementById("functional-save-review").disabled = !hasCurrentAttempt;
   document.getElementById("functional-undo-attempt").disabled = !hasCurrentAttempt;
-  document.getElementById("functional-repeat-prompt").disabled = !hasCurrentAttempt || !functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]).includes(functionalAttempts[functionalLastAttemptIndex()].prompt);
+  document.getElementById("functional-save-listener").disabled = !hasCurrentAttempt;
+  const latest = hasCurrentAttempt ? functionalAttempts[functionalLastAttemptIndex()] : null;
+  document.getElementById("functional-consent-features").disabled = !latest || (functionalLastSignature?.at !== latest.at && !latest.listenerSignature);
   functionalRenderScore();
   const history = document.getElementById("functional-history");
   history.replaceChildren();
@@ -561,6 +655,7 @@ function functionalRenderHistory() {
     if (Number.isFinite(item.score) && functionalReferences[functionalReferenceKey(item.exercise, item.prompt)]?.basedOn !== item.at) details.push(`semelhança ${item.score}/100`);
     if (item.clarity != null) details.push(`clareza ${item.clarity}/10`);
     if (item.effort != null) details.push(`esforço ${item.effort}/10`);
+    if (item.listenerResult) details.push(`ouvinte: ${{ all: "entendeu tudo", part: "entendeu parte", none: "não entendeu" }[item.listenerResult] || item.listenerResult}`);
     meta.textContent = details.join(" · ");
     row.append(title, meta);
     history.appendChild(row);
@@ -674,6 +769,7 @@ function functionalInit() {
       functionalTargets = { words, phrases };
       functionalPromptIndex = 0;
       functionalRenderExercise();
+      functionalRenderHistory();
       functionalMessage("Palavras e frases salvas neste navegador.");
     }
   });
@@ -683,7 +779,16 @@ function functionalInit() {
   document.getElementById("functional-add-attempt").addEventListener("click", () => functionalCountAttempt("manual"));
   document.getElementById("functional-undo-attempt").addEventListener("click", functionalUndoAttempt);
   document.getElementById("functional-repeat-prompt").addEventListener("click", functionalRepeatPrompt);
+  document.getElementById("functional-next-prompt").addEventListener("click", functionalNextPrompt);
+  document.getElementById("functional-hear-explanation").addEventListener("click", () => {
+    window.vocalizandoVoice.playExplanation(FUNCTIONAL_EXERCISES[functionalIndex].id, document.getElementById("voice-status"));
+  });
+  document.getElementById("functional-hear-prompt").addEventListener("click", () => {
+    const phrase = functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex])[functionalPromptIndex];
+    window.vocalizandoVoice.speak(phrase, document.getElementById("functional-voice-player"), document.getElementById("voice-status"));
+  });
   document.getElementById("functional-set-reference").addEventListener("click", functionalSetReference);
+  document.getElementById("functional-save-listener").addEventListener("click", functionalSaveListener);
   document.getElementById("functional-baseline").addEventListener("submit", functionalSaveBaseline);
   for (const field of ["clarity", "effort"]) {
     document.getElementById(`functional-${field}`).addEventListener("input", event => {
@@ -691,11 +796,10 @@ function functionalInit() {
     });
   }
   window.addEventListener("pagehide", () => {
-    functionalStopRecording();
-    for (const audio of functionalAudio.values()) URL.revokeObjectURL(audio.url);
+    functionalStopRecording("background");
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && (functionalListening || functionalStarting)) functionalStopRecording();
+    if (document.hidden && functionalListening) functionalStopRecording("background");
   });
   functionalResetTimer();
   functionalRenderExercise();

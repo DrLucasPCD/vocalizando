@@ -1,0 +1,16 @@
+{
+  "name": "vocalizando-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:voice": "node tools/build-voice.mjs"
+  },
+  "dependencies": {
+    "@diffusionstudio/piper-wasm": "1.0.0",
+    "@mintplex-labs/piper-tts-web": "1.0.5",
+    "onnxruntime-web": "1.18.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9"
+  }
+}

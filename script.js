@@ -690,6 +690,7 @@ function speakTwisterFallback(error) {
 }
 
 function hearTwister() {
+  window.vocalizandoVoice?.stop();
   const error = document.getElementById("twister-error");
   error.hidden = true;
   stopTwisterPlayback();
@@ -894,10 +895,13 @@ function stopPronunciation() {
 }
 
 async function startPronunciation() {
+  window.vocalizandoVoice?.stop();
   if (tongueState.listening) {
     stopPronunciation();
     return;
   }
+
+  if (typeof functionalListening !== "undefined" && functionalListening) functionalStopRecording();
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
@@ -1469,7 +1473,7 @@ function exportVocalizingData() {
   const data = {};
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index);
-    if (key?.startsWith("vocalizing-")) {
+    if (validBackupKey(key)) {
       try { data[key] = JSON.parse(localStorage.getItem(key)); }
       catch (e) { data[key] = localStorage.getItem(key); }
     }
@@ -1482,6 +1486,41 @@ function exportVocalizingData() {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function validBackupKey(key) {
+  return /^vocalizing-(?:\d{4}-\d{2}-\d{2}|twisters-\d{4}-\d{2}-\d{2}|profile|settings|functional-(?:v1|baseline-v1|targets-v1|references-v1))$/.test(key);
+}
+
+async function importVocalizingData(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  const status = document.getElementById("data-status");
+  try {
+    if (file.size > 5 * 1024 * 1024) throw new Error("O backup excede 5 MB.");
+    const backup = JSON.parse(await file.text());
+    if (!backup || typeof backup !== "object" || !backup.data || typeof backup.data !== "object" || Array.isArray(backup.data)) throw new Error("Arquivo de backup inválido.");
+    const entries = Object.entries(backup.data);
+    if (!entries.length || entries.some(([key, value]) => !validBackupKey(key) || !value || typeof value !== "object")) throw new Error("O backup contém dados desconhecidos ou inválidos.");
+    if (!window.confirm(`Substituir os dados deste navegador pelos ${entries.length} registros do backup? Exporte os dados atuais antes de continuar.`)) return;
+    const previous = {};
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (validBackupKey(key)) previous[key] = localStorage.getItem(key);
+    }
+    try {
+      Object.keys(previous).forEach(key => localStorage.removeItem(key));
+      entries.forEach(([key, value]) => localStorage.setItem(key, JSON.stringify(value)));
+    } catch (error) {
+      entries.forEach(([key]) => localStorage.removeItem(key));
+      Object.entries(previous).forEach(([key, value]) => localStorage.setItem(key, value));
+      throw new Error("Não houve espaço para importar. Os dados anteriores foram restaurados.");
+    }
+    location.reload();
+  } catch (error) {
+    status.textContent = error.message || "Não foi possível importar o backup.";
+  }
 }
 
 function deleteVocalizingData() {
@@ -1515,16 +1554,9 @@ function saveCounts() {
   localStorage.setItem(todayKey(), JSON.stringify(state));
 }
 
-function reportExerciseScore(key, goal) {
-  const completion = Math.min(1, state[key] / goal);
-  const metric = state.metrics?.[key];
-  const confidence = metric?.accepted ? metric.confidenceSum / metric.accepted : 0;
-  return state[key] ? Math.round((completion * 0.65 + confidence * 0.35) * 100) : 0;
-}
-
 function reportTip(key, completion, confidence) {
   if (!completion) return key === "tara" ? "Inicie devagar e separe bem as sílabas Tá, Rá e Lá." : "Sustente o som sem apertar a garganta e mantenha o volume estável.";
-  if (confidence && confidence < 0.82) return key === "tara" ? "Articule o R e o L com mais nitidez; diminua o ritmo até o modelo reconhecer com segurança." : "Evite oscilar o volume; mantenha o som III contínuo e com a mesma intensidade.";
+  if (confidence && confidence < 0.82) return "O modelo teve baixa confiança. Confira a contagem e tente novamente se desejar; isso não mede a clareza da sua fala.";
   if (completion < 1) return `Faltam ${Math.max(0, (key === "tara" ? 15 : 20) - state[key])} repetições. Preserve a mesma qualidade até concluir.`;
   return key === "tara" ? "Meta concluída. Aumente o ritmo sem perder a separação das sílabas." : "Meta concluída. Alongue cada emissão mantendo a voz relaxada e uniforme.";
 }
@@ -1538,7 +1570,17 @@ function readDailyActivity(date) {
   const key = localDateKey(date);
   try { exercises = JSON.parse(localStorage.getItem("vocalizing-" + key) || "{}"); } catch (e) {}
   try { twisters = JSON.parse(localStorage.getItem("vocalizing-twisters-" + key) || "{}"); } catch (e) {}
-  return { reps: (Number(exercises.tara) || 0) + (Number(exercises.iii) || 0), attempts: Number(twisters.attempts) || 0 };
+  const functional = readFunctionalAttempts().filter(item => item.at && localDateKey(new Date(item.at)) === key).length;
+  return { reps: (Number(exercises.tara) || 0) + (Number(exercises.iii) || 0), attempts: Number(twisters.attempts) || 0, functional };
+}
+
+function readFunctionalAttempts() {
+  try {
+    const attempts = JSON.parse(localStorage.getItem("vocalizing-functional-v1") || "[]");
+    return Array.isArray(attempts) ? attempts : [];
+  } catch (error) {
+    return [];
+  }
 }
 
 function readExerciseDay(date, key) {
@@ -1568,14 +1610,12 @@ function renderExerciseHistory(days) {
 function updateReport() {
   if (!document.getElementById("overall-score")) return;
   const goals = { tara: 15, iii: 20 };
-  const scores = {};
   ["tara", "iii"].forEach(key => {
     const metric = state.metrics?.[key];
     const confidence = metric?.accepted ? metric.confidenceSum / metric.accepted : 0;
     const completion = Math.min(1, state[key] / goals[key]);
-    scores[key] = reportExerciseScore(key, goals[key]);
-    document.getElementById(`report-${key}-score`).textContent = scores[key];
-    document.getElementById(`report-${key}-bar`).style.width = scores[key] + "%";
+    document.getElementById(`report-${key}-score`).textContent = state[key];
+    document.getElementById(`report-${key}-bar`).style.width = Math.round(completion * 100) + "%";
     document.getElementById(`report-${key}-reps`).textContent = `${state[key]} de ${goals[key]}`;
     document.getElementById(`report-${key}-confidence`).textContent = metric?.accepted ? Math.round(confidence * 100) + "%" : "—";
     document.getElementById(`report-${key}-tip`).textContent = reportTip(key, completion, confidence);
@@ -1583,35 +1623,38 @@ function updateReport() {
 
   const history = Array.isArray(tongueState.history) ? tongueState.history : [];
   const scoredHistory = history.filter(item => Number.isFinite(item.score));
-  const twisterAverage = scoredHistory.length ? Math.round(scoredHistory.reduce((sum, item) => sum + item.score, 0) / scoredHistory.length) : tongueState.best;
-  scores.twister = twisterAverage;
-  document.getElementById("report-twister-score").textContent = twisterAverage;
-  document.getElementById("report-twister-bar").style.width = twisterAverage + "%";
+  const twisterAverage = scoredHistory.length ? Math.round(scoredHistory.reduce((sum, item) => sum + item.score, 0) / scoredHistory.length) : null;
+  document.getElementById("report-twister-score").textContent = twisterAverage == null ? "—" : twisterAverage;
+  document.getElementById("report-twister-bar").style.width = (twisterAverage || 0) + "%";
   document.getElementById("report-twister-attempts").textContent = `${tongueState.attempts} hoje`;
-  document.getElementById("report-twister-best").textContent = tongueState.best || "—";
-  const lowestAttempt = scoredHistory.slice().sort((a, b) => a.score - b.score)[0];
+  document.getElementById("report-twister-best").textContent = scoredHistory.length ? tongueState.best : "—";
   const twisterTip = !tongueState.attempts
     ? "Grave um desafio para receber uma orientação de dicção."
     : !scoredHistory.length
       ? "Sua prática foi registrada sem nota. Use pausas e o modo assistido na próxima tentativa."
       : twisterAverage < 75
-        ? `Pratique em trechos e reforce ${lowestAttempt?.focus || "os sons da frase"}; a nota reflete apenas o que o navegador transcreveu.`
-        : "Boa correspondência com a frase. Aumente a velocidade apenas se estiver confortável.";
+        ? "O navegador transcreveu apenas parte da frase. Isso pode ser uma falha de reconhecimento; confira o texto ouvido."
+        : "A transcrição se aproximou da frase. Isso não substitui o retorno de um ouvinte.";
   document.getElementById("report-twister-tip").textContent = twisterTip;
 
-  const activeScores = Object.values(scores).filter(value => value > 0);
-  const overall = activeScores.length ? Math.round(activeScores.reduce((sum, value) => sum + value, 0) / activeScores.length) : 0;
-  document.getElementById("overall-score").textContent = overall;
-  document.getElementById("overall-ring").style.setProperty("--score", (overall * 3.6) + "deg");
-  document.getElementById("overall-title").textContent = overall >= 85 ? "Excelente treino!" : overall >= 65 ? "Você está evoluindo" : overall > 0 ? "Bom começo" : "Comece seu treino";
-  document.getElementById("overall-copy").textContent = overall >= 85 ? "Seu desempenho está consistente. Continue refinando ritmo e estabilidade." : overall > 0 ? "Complete as metas e aplique as orientações abaixo para elevar sua nota." : "Conclua repetições ou grave um trava-língua para gerar sua análise.";
+  const functionalToday = readFunctionalAttempts().filter(item => item.at && localDateKey(new Date(item.at)) === localDateKey(new Date()));
+  const listenerReviews = functionalToday.filter(item => ["all", "part", "none"].includes(item.listenerResult));
+  const fullyUnderstood = listenerReviews.filter(item => item.listenerResult === "all").length;
+  document.getElementById("report-functional-summary").textContent = functionalToday.length
+    ? `Treino funcional: ${functionalToday.length} tentativas hoje · ${listenerReviews.length} avaliadas por ouvinte · ${fullyUnderstood} entendidas por inteiro.`
+    : "Treino funcional: nenhuma tentativa registrada hoje.";
+  const activeModes = [state.tara > 0, state.iii > 0, tongueState.attempts > 0, functionalToday.length > 0].filter(Boolean).length;
+  document.getElementById("overall-score").textContent = activeModes;
+  document.getElementById("overall-ring").style.setProperty("--score", (activeModes * 90) + "deg");
+  document.getElementById("overall-title").textContent = activeModes ? `${activeModes} de 4 atividades praticadas` : "Comece seu treino";
+  document.getElementById("overall-copy").textContent = activeModes ? "Veja abaixo repetições, confiança do modelo, transcrição e retorno de ouvintes separadamente." : "Repetições, trava-línguas e treino funcional aparecerão separadamente abaixo.";
 
   const focusOptions = [
-    { score: scores.tara, started: state.tara > 0, title: "Articulação do R e L", copy: document.getElementById("report-tara-tip").textContent, href: "#tara" },
-    { score: scores.iii, started: state.iii > 0, title: "Sustentação e estabilidade", copy: document.getElementById("report-iii-tip").textContent, href: "#iii" },
-    { score: scores.twister, started: tongueState.attempts > 0, title: "Clareza na dicção", copy: twisterTip, href: "#trava-linguas" }
+    { progress: state.tara / goals.tara, started: state.tara > 0, title: "Articulação do R e L", copy: document.getElementById("report-tara-tip").textContent, href: "#tara" },
+    { progress: state.iii / goals.iii, started: state.iii > 0, title: "Sustentação e estabilidade", copy: document.getElementById("report-iii-tip").textContent, href: "#iii" },
+    { progress: tongueState.attempts / 3, started: tongueState.attempts > 0, title: "Trava-línguas", copy: twisterTip, href: "#trava-linguas" }
   ];
-  let focus = focusOptions.filter(item => item.started).sort((a, b) => a.score - b.score)[0];
+  let focus = focusOptions.filter(item => item.started).sort((a, b) => a.progress - b.progress)[0];
   if (!focus) {
     try {
       const profile = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}");
@@ -1636,7 +1679,7 @@ function updateReport() {
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() - offset);
     const activity = readDailyActivity(date);
-    days.push({ date, value: activity.reps + activity.attempts * 5, active: activity.reps + activity.attempts > 0 });
+    days.push({ date, value: activity.reps + activity.attempts + activity.functional, active: activity.reps + activity.attempts + activity.functional > 0 });
   }
   const maxValue = Math.max(35, ...days.map(day => day.value));
   document.getElementById("weekly-active-days").textContent = days.filter(day => day.active).length;
@@ -1777,12 +1820,14 @@ function resetDetectionCycle() {
 }
 
 async function startRecognition() {
+  window.vocalizandoVoice?.stop();
   if (modelListening) {
     if (guided.active) stopGuidedTraining(false);
     stopRecognition();
     return;
   }
 
+  if (typeof functionalListening !== "undefined" && functionalListening) functionalStopRecording();
   if (tongueState.listening) stopPronunciation();
   const modelStatus = document.querySelector("#model-status span");
   const debug = document.querySelector("#debug");
@@ -2003,6 +2048,8 @@ window.addEventListener("DOMContentLoaded", () => {
   document.getElementById("check-microphone").addEventListener("click", verifyMicrophonePermission);
   document.getElementById("check-camera").addEventListener("click", verifyCameraPermission);
   document.getElementById("export-data").addEventListener("click", exportVocalizingData);
+  document.getElementById("import-data").addEventListener("click", () => document.getElementById("import-file").click());
+  document.getElementById("import-file").addEventListener("change", importVocalizingData);
   document.getElementById("delete-data").addEventListener("click", deleteVocalizingData);
 
   // eye UI
