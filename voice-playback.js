@@ -3,6 +3,7 @@
   let activeUrl = null;
   let requestId = 0;
   let runtimePromise = null;
+  const EXPLANATION_VERSION = "20260928-1";
 
   function stop() {
     requestId++;
@@ -39,7 +40,7 @@
     stop();
     const target = player || document.getElementById(id === "trava" ? "twister-explanation-player" : "exercise-explanation-player");
     const audio = target || new Audio();
-    audio.src = `/audio/explanations/${id}.mp3`;
+    audio.src = `/audio/explanations/${id}.mp3?v=${EXPLANATION_VERSION}`;
     audio.hidden = false;
     audio.onerror = () => {
       audio.hidden = true;
