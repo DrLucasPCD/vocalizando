@@ -347,3 +347,5 @@ body.calibrating { overflow: hidden; }body.calibrating #webgazerVideoContainer {
 .twister-audio-row strong { min-width: min(100%, 220px); max-width: 400px; font-size: 11px; }
 .twister-audio-row audio { width: min(100%, 260px); height: 36px; }
 .twister-audio-row select, .twister-audio-row button { font: inherit; font-size: 11px; padding: 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); }
+.explanation-player { display: block; width: min(100%, 420px); height: 38px; margin-top: 12px; }
+.explanation-player[hidden] { display: none; }

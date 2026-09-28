@@ -9,9 +9,11 @@
     if (typeof stopTwisterPlayback === "function") stopTwisterPlayback();
     if (activeAudio) {
       activeAudio.pause();
+      activeAudio.onended = null;
+      activeAudio.onerror = null;
       activeAudio.removeAttribute("src");
       activeAudio.load();
-      if (activeAudio.id === "functional-voice-player") activeAudio.hidden = true;
+      if (activeAudio.id === "functional-voice-player" || activeAudio.classList.contains("explanation-player")) activeAudio.hidden = true;
       activeAudio = null;
     }
     if (activeUrl) URL.revokeObjectURL(activeUrl);
@@ -20,9 +22,12 @@
     if (status) status.textContent = "";
   }
 
-  function startPlayback(audio, status) {
+  function startPlayback(audio, status, endMessage = "Áudio concluído.") {
     activeAudio = audio;
     audio.setAttribute("playsinline", "");
+    audio.onended = () => {
+      if (activeAudio === audio && status) status.textContent = endMessage;
+    };
     audio.play().then(() => {
       if (status) status.textContent = "Reproduzindo.";
     }).catch(() => {
@@ -30,14 +35,18 @@
     });
   }
 
-  function playExplanation(id, status) {
+  function playExplanation(id, status, player) {
     stop();
-    const audio = new Audio(`/audio/explanations/${id}.mp3`);
+    const target = player || document.getElementById(id === "trava" ? "twister-explanation-player" : "exercise-explanation-player");
+    const audio = target || new Audio();
+    audio.src = `/audio/explanations/${id}.mp3`;
+    audio.hidden = false;
     audio.onerror = () => {
+      audio.hidden = true;
       if (status) status.textContent = "Não foi possível carregar a explicação.";
     };
     if (status) status.textContent = "Preparando explicação...";
-    startPlayback(audio, status);
+    startPlayback(audio, status, "Explicação concluída.");
   }
 
   async function speak(text, player, status) {

@@ -84,6 +84,7 @@
             <button type="button" class="outline-button" data-explanation="trava">Ouvir explicação</button>
             <button id="record-twister" type="button" class="record-button"><span class="mic-shape" aria-hidden="true"></span> Gravar minha voz</button>
           </div>
+          <audio id="twister-explanation-player" class="explanation-player" controls hidden></audio>
           <div class="audio-controls" aria-label="Controles do exemplo em áudio">
             <button id="pause-twister" type="button" aria-label="Pausar ou continuar exemplo" title="Pausar ou continuar">Ⅱ</button>
             <button id="repeat-twister" type="button" aria-label="Repetir exemplo" title="Repetir exemplo">↻</button>
@@ -185,6 +186,7 @@
         </div>
         <button id="guide-start" type="button" class="compact-action">Começar treino guiado</button>
         <div class="voice-actions"><button type="button" class="functional-secondary" data-explanation="tara">Ouvir Tá Rá Lá</button><button type="button" class="functional-secondary" data-explanation="iii">Ouvir III</button></div>
+        <audio id="exercise-explanation-player" class="explanation-player" controls hidden></audio>
       </section>
 
       <section class="personal-panel" aria-labelledby="personal-title">
@@ -285,6 +287,7 @@
           </div>
           <p id="functional-instruction" class="functional-instruction"></p>
           <button id="functional-hear-explanation" type="button" class="functional-secondary">Ouvir explicação</button>
+          <audio id="functional-explanation-player" class="explanation-player" controls hidden></audio>
           <div id="functional-prompt" class="functional-prompt" aria-live="polite"></div>
           <div class="functional-prompt-actions"><button id="functional-hear-prompt" type="button" class="functional-secondary">Ouvir frase</button><button id="functional-repeat-prompt" type="button" class="functional-secondary" disabled>Frase anterior</button><button id="functional-next-prompt" type="button" class="functional-secondary">Próxima frase</button></div>
           <audio id="functional-voice-player" controls hidden></audio>
@@ -511,7 +514,7 @@
   <script src="/vendor/tf-1.7.4.min.js?v=20260728-1"></script>
   <script src="/vendor/speech-commands.min.js?v=20260728-1"></script>
   <script src="voice-data.js?v=20260927-3"></script>
-  <script src="voice-playback.js?v=20260927-2"></script>
+  <script src="voice-playback.js?v=20260928-1"></script>
   <script src="script.js?v=20260927-3"></script>
   <script src="personal-training.js?v=20260927-3"></script>
   <script type="module" src="firebase-cloud.js?v=20260927-3"></script>

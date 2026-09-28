@@ -843,7 +843,7 @@ function functionalInit() {
   document.getElementById("functional-repeat-prompt").addEventListener("click", functionalRepeatPrompt);
   document.getElementById("functional-next-prompt").addEventListener("click", functionalNextPrompt);
   document.getElementById("functional-hear-explanation").addEventListener("click", () => {
-    window.vocalizandoVoice.playExplanation(FUNCTIONAL_EXERCISES[functionalIndex].id, document.getElementById("voice-status"));
+    window.vocalizandoVoice.playExplanation(FUNCTIONAL_EXERCISES[functionalIndex].id, document.getElementById("voice-status"), document.getElementById("functional-explanation-player"));
   });
   document.getElementById("functional-hear-prompt").addEventListener("click", () => {
     const phrase = functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex])[functionalPromptIndex];

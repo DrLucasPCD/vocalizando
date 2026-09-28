@@ -10,6 +10,9 @@
 /script.js
   Cache-Control: no-store
 
+/voice-playback.js
+  Cache-Control: no-store
+
 /functional-training.js
   Cache-Control: no-store
 
