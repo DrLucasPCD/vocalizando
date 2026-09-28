@@ -90,6 +90,7 @@ let functionalNoiseFloor = 0.002;
 let functionalSegment = null;
 let functionalLastSampleAt = 0;
 let functionalAudio = new Map();
+let functionalSavedUrls = [];
 
 function functionalRead(key, fallback) {
   try {
@@ -212,8 +213,68 @@ function functionalRenderAudio() {
     download.href = item.url;
     download.download = `vocalizando-${FUNCTIONAL_EXERCISES[functionalIndex].id}-${version}.${item.extension}`;
     download.textContent = "Baixar áudio";
-    row.append(label, player, download);
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "functional-secondary";
+    save.textContent = "Guardar áudio";
+    save.addEventListener("click", async () => {
+      if (!document.getElementById("functional-consent-audio").checked) {
+        functionalMessage("Autorize guardar a gravação antes de continuar.");
+        return;
+      }
+      try {
+        save.disabled = true;
+        await window.vocalizandoData.saveRecording({
+          id: `functional-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          kind: "functional",
+          at: item.at,
+          updatedAt: new Date().toISOString(),
+          exercise: FUNCTIONAL_EXERCISES[functionalIndex].id,
+          prompt: item.prompt,
+          version,
+          blob: item.blob
+        });
+        functionalMessage("Gravação guardada neste navegador. Use Sincronizar agora para enviá-la à sua conta.");
+        functionalRenderSavedAudio();
+      } catch (error) {
+        functionalMessage(`Não foi possível guardar o áudio: ${error.message}.`);
+      } finally { save.disabled = false; }
+    });
+    row.append(label, player, download, save);
     list.appendChild(row);
+  }
+}
+
+async function functionalRenderSavedAudio() {
+  const list = document.getElementById("functional-saved-audio");
+  try {
+    const records = (await window.vocalizandoData.recordings()).filter(item => item.kind === "functional").sort((a, b) => b.at.localeCompare(a.at));
+    functionalSavedUrls.forEach(url => URL.revokeObjectURL(url));
+    functionalSavedUrls = [];
+    list.replaceChildren();
+    for (const item of records) {
+      const row = document.createElement("div");
+      row.className = "functional-audio-row";
+      const title = document.createElement("strong");
+      title.textContent = `${FUNCTIONAL_EXERCISES.find(exercise => exercise.id === item.exercise)?.name || item.exercise} · ${item.version === "clara" ? "Clara" : "Habitual"}`;
+      const audio = document.createElement("audio");
+      audio.controls = true;
+      audio.preload = "metadata";
+      audio.src = URL.createObjectURL(item.blob);
+      functionalSavedUrls.push(audio.src);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "functional-secondary";
+      remove.textContent = "Excluir";
+      remove.addEventListener("click", async () => {
+        await window.vocalizandoData.deleteRecording(item.id);
+        functionalRenderSavedAudio();
+      });
+      row.append(title, audio, remove);
+      list.append(row);
+    }
+  } catch (error) {
+    list.textContent = "As gravações guardadas estão indisponíveis neste navegador.";
   }
 }
 
@@ -425,6 +486,7 @@ async function functionalStartRecording() {
         const recorder = new MediaRecorder(stream, preferred ? { mimeType: preferred } : undefined);
         const version = document.getElementById("functional-version").value;
         const exerciseId = FUNCTIONAL_EXERCISES[functionalIndex].id;
+        const prompt = functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex])[functionalPromptIndex];
         const chunks = [];
         recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
         recorder.onstop = () => {
@@ -434,7 +496,7 @@ async function functionalStartRecording() {
           const key = `${exerciseId}:${version}`;
           const previous = functionalAudio.get(key);
           if (previous) URL.revokeObjectURL(previous.url);
-          functionalAudio.set(key, { url: URL.createObjectURL(blob), extension: blob.type.includes("webm") ? "webm" : "m4a" });
+          functionalAudio.set(key, { url: URL.createObjectURL(blob), blob, at: new Date().toISOString(), prompt, extension: blob.type.includes("webm") ? "webm" : "m4a" });
           functionalRenderAudio();
         };
         recorder.start();
@@ -803,8 +865,10 @@ function functionalInit() {
   });
   functionalResetTimer();
   functionalRenderExercise();
+  functionalRenderSavedAudio();
   functionalRenderHistory();
   functionalRenderBaselines();
 }
 
 window.addEventListener("DOMContentLoaded", functionalInit);
+window.addEventListener("vocalizando-recordings-updated", functionalRenderSavedAudio);

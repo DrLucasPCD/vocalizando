@@ -13,6 +13,18 @@
 /functional-training.js
   Cache-Control: no-store
 
+/voice-data.js
+  Cache-Control: no-store
+
+/personal-training.js
+  Cache-Control: no-store
+
+/review-recordings.js
+  Cache-Control: no-store
+
+/firebase-cloud.js
+  Cache-Control: no-store
+
 /styles.css
   Cache-Control: no-store
 

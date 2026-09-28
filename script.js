@@ -26,7 +26,9 @@ const LABEL2KEY = {
   "ta ra la": "tara",
   "iii": "iii",
   "exercicio ta ra la": "tara",
-  "exercicio iii": "iii"
+  "exercicio iii": "iii",
+  "personal_tara": "tara",
+  "personal_iii": "iii"
 };
 
 /* Uma repetição precisa ser confirmada e depois encerrada antes da próxima. */
@@ -46,6 +48,7 @@ const TARGETS = {
 };
 
 let recognizer = null;
+let listeningRecognizer = null;
 let modelLoadPromise = null;
 let tensorflowReadyPromise = null;
 let state = { tara: 0, iii: 0 };
@@ -1523,8 +1526,15 @@ async function importVocalizingData(event) {
   }
 }
 
-function deleteVocalizingData() {
+async function deleteVocalizingData() {
   if (!window.confirm("Apagar todo o histórico e as preferências salvas neste navegador?")) return;
+  try {
+    await window.vocalizandoData?.clear();
+    await window.vocalizandoPersonal?.clearAll();
+  } catch (error) {
+    document.getElementById("data-status").textContent = `Não foi possível apagar as gravações locais: ${error.message}.`;
+    return;
+  }
   const keys = [];
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index);
@@ -1851,11 +1861,18 @@ async function startRecognition() {
     return;
   }
 
+  try { await window.vocalizandoPersonal?.ready(); }
+  catch (error) { console.warn("Usando modelo original", error); }
+  const activeRecognizer = window.vocalizandoPersonal?.activeRecognizer() || recognizer;
+  const personalActive = activeRecognizer !== recognizer;
+  const threshold = personalActive ? 0.80 : THRESHOLD;
+  const releaseThreshold = personalActive ? 0.40 : RELEASE_THRESHOLD;
+
   resetDetectionCycle();
 
   try {
-    await recognizer.listen(result => {
-      const labels = recognizer.wordLabels();
+    await activeRecognizer.listen(result => {
+      const labels = activeRecognizer.wordLabels();
       const scores = result.scores;
       const idx    = scores.indexOf(Math.max(...scores));
       const raw    = labels[idx];
@@ -1872,8 +1889,9 @@ async function startRecognition() {
         }
       });
 
-      document.querySelector("#debug").textContent = `${raw} (${conf.toFixed(2)})`;
-      updateConfidence(conf, raw);
+      const displayLabel = raw === "personal_tara" ? "Tá Rá Lá" : raw === "personal_iii" ? "III" : raw === "_background_noise_" ? "Silêncio" : raw;
+      document.querySelector("#debug").textContent = `${displayLabel} (${conf.toFixed(2)})`;
+      updateConfidence(conf, displayLabel);
 
       if (guided.active && guided.resting) {
         resetDetectionCandidate();
@@ -1881,7 +1899,7 @@ async function startRecognition() {
       }
 
       if (!detectionCycle.armed) {
-        if (exerciseConf <= RELEASE_THRESHOLD) {
+        if (exerciseConf <= releaseThreshold) {
           detectionCycle.releaseFrames++;
           if (
             detectionCycle.releaseFrames >= RELEASE_FRAMES &&
@@ -1896,11 +1914,11 @@ async function startRecognition() {
         return;
       }
 
-      if (!exerciseKey || exerciseConf < THRESHOLD) {
+      if (!exerciseKey || exerciseConf < threshold) {
         resetDetectionCandidate();
-        if (exerciseConf > THRESHOLD - 0.1) {
+        if (exerciseConf > threshold - 0.1) {
           const next = state.tara < TARGETS[EX_TARA_LABEL].goal ? "tara" : "iii";
-          setFeedback(next, "Projete mais a voz e articule bem.", "low");
+          setFeedback(next, "O modelo não reconheceu desta vez. Tente no seu ritmo ou corrija a contagem.", "low");
         }
         return;
       }
@@ -1964,10 +1982,12 @@ async function startRecognition() {
       }
     });
 
-    modelStatus.textContent = "Pronto";
+    listeningRecognizer = activeRecognizer;
+    modelStatus.textContent = personalActive ? "Personalizado" : "Pronto";
     debug.textContent = "Escutando…";
     setListening(true);
   } catch (error) {
+    listeningRecognizer = null;
     resetDetectionCycle();
     setListening(false);
     modelStatus.textContent = "Microfone bloqueado";
@@ -1980,8 +2000,9 @@ async function startRecognition() {
 
 function stopRecognition() {
   try {
-    if (recognizer && typeof recognizer.stopListening === "function") recognizer.stopListening();
+    if (listeningRecognizer && typeof listeningRecognizer.stopListening === "function") listeningRecognizer.stopListening();
   } catch (e) {}
+  listeningRecognizer = null;
   resetDetectionCycle();
   setListening(false);
   document.querySelector("#debug").textContent = "Reconhecimento pausado.";

@@ -103,7 +103,7 @@
             <input id="assisted-recognition" type="checkbox" checked>
             <span><strong>Reconhecimento assistido</strong><small>Aceita pausas maiores e compara diferentes interpretações da frase.</small></span>
           </label>
-          <p class="privacy-copy">O áudio não é armazenado pelo Vocalizando. A nota é uma estimativa da transcrição do navegador e não avalia clinicamente sua fala.</p>
+          <p class="privacy-copy">A nota é uma estimativa da transcrição do navegador e não avalia clinicamente sua fala. A gravação de revisão só é guardada com sua autorização.</p>
           <div id="twister-error" class="inline-alert" role="alert" hidden></div>
           <button id="register-practice" type="button" class="register-practice" hidden>Registrar prática sem nota</button>
         </article>
@@ -125,6 +125,14 @@
             <button id="try-again" type="button" class="try-button">Tentar novamente</button>
           </div>
         </aside>
+      </div>
+
+      <div class="twister-review">
+        <h3>Revisão por um ouvinte</h3>
+        <p>Grave a frase atual para ouvi-la depois ou mostrá-la a alguém. Esta gravação é separada da nota automática.</p>
+        <label class="personal-consent"><input id="twister-audio-consent" type="checkbox"> Autorizo guardar esta gravação neste navegador.</label>
+        <div class="personal-data-actions"><button id="twister-audio-record" type="button">Gravar para revisão</button><span id="twister-audio-status" role="status"></span></div>
+        <div id="twister-saved-audio"></div>
       </div>
 
       <div class="challenge-stats" aria-label="Seu progresso nos trava-línguas">
@@ -177,6 +185,31 @@
         </div>
         <button id="guide-start" type="button" class="compact-action">Começar treino guiado</button>
         <div class="voice-actions"><button type="button" class="functional-secondary" data-explanation="tara">Ouvir Tá Rá Lá</button><button type="button" class="functional-secondary" data-explanation="iii">Ouvir III</button></div>
+      </section>
+
+      <section class="personal-panel" aria-labelledby="personal-title">
+        <div class="personal-heading"><div><span class="card-label">Sua voz</span><h3 id="personal-title">Treinar reconhecimento</h3></div><strong id="personal-mode">Modelo original</strong></div>
+        <p>Grave pelo menos 5 exemplos de Tá Rá Lá, 5 de III e 5 de silêncio. O treino ajusta o reconhecimento desses dois exercícios neste navegador; não avalia clinicamente sua fala.</p>
+        <label class="personal-consent"><input id="personal-consent" type="checkbox"> Autorizo guardar os exemplos e o áudio somente neste navegador.</label>
+        <div class="personal-actions">
+          <label for="personal-label">Exemplo<select id="personal-label"><option value="personal_tara">Tá Rá Lá</option><option value="personal_iii">III</option><option value="_background_noise_">Silêncio</option></select></label>
+          <button id="personal-record" type="button">Gravar exemplo</button>
+          <button id="personal-train" type="button" disabled>Treinar modelo</button>
+          <button id="personal-toggle" type="button" disabled>Usar modelo original</button>
+        </div>
+        <div id="personal-counts" class="personal-counts" aria-live="polite"></div>
+        <p id="personal-status" class="personal-status" role="status" aria-live="polite">Nenhum exemplo gravado.</p>
+        <div id="personal-examples" class="personal-examples"></div>
+        <audio id="personal-player" controls hidden></audio>
+        <div class="personal-data-actions"><button id="personal-export" type="button" disabled>Exportar exemplos</button><button id="personal-import" type="button">Importar exemplos</button><input id="personal-import-file" type="file" accept=".bin,application/octet-stream" hidden><button id="personal-delete" type="button" disabled>Apagar treino</button></div>
+        <div class="cloud-sync" aria-labelledby="cloud-title">
+          <div class="personal-heading"><h4 id="cloud-title">Sincronizar entre aparelhos</h4><strong id="cloud-account">Desconectado</strong></div>
+          <p>Exemplos de voz e gravações de revisão podem ser guardados na sua conta Firebase. O envio exige sua autorização; o modelo treinado permanece neste aparelho.</p>
+          <label class="personal-consent"><input id="cloud-consent" type="checkbox"> Autorizo sincronizar meus exemplos de voz e gravações com minha conta Firebase.</label>
+          <div class="personal-data-actions"><button id="cloud-login" type="button">Entrar com Google</button><button id="cloud-logout" type="button" hidden>Sair</button><button id="cloud-sync" type="button" disabled>Sincronizar agora</button><button id="cloud-delete" type="button" disabled>Apagar da nuvem</button></div>
+          <div id="cloud-conflict" class="personal-data-actions" hidden><button id="cloud-use-local" type="button">Usar deste aparelho</button><button id="cloud-use-remote" type="button">Usar da nuvem</button></div>
+          <p id="cloud-status" class="personal-status" role="status">Nenhuma gravação é enviada automaticamente.</p>
+        </div>
       </section>
 
       <section class="permission-panel" aria-label="Permissões do dispositivo">
@@ -292,7 +325,9 @@
           <label for="functional-version">Versão</label>
           <select id="functional-version"><option value="habitual">Habitual</option><option value="clara">Clara</option></select>
           <div id="functional-audio-list"></div>
-          <p class="functional-guidance">A contagem é automática após iniciar a escuta. Se o navegador permitir gravar, o áudio fica apenas nesta visita; baixe-o para guardar.</p>
+          <label class="functional-consent"><input id="functional-consent-audio" type="checkbox"> Autorizo guardar as gravações selecionadas neste navegador.</label>
+          <div id="functional-saved-audio"></div>
+          <p class="functional-guidance">A contagem é automática após iniciar a escuta. O áudio só é guardado quando você tocar em Guardar áudio.</p>
           <div class="functional-ratings">
             <label for="functional-clarity">Clareza percebida (0–10)</label>
             <input id="functional-clarity" type="range" min="0" max="10" value="5">
@@ -399,7 +434,7 @@
       </article>
 
       <section class="data-panel" aria-label="Seus dados">
-        <div><span class="card-label">Dados no dispositivo</span><h3>Backup do histórico</h3><p>Exporte para guardar uma cópia ou importe um backup deste app. A importação substitui os dados atuais. O arquivo pode incluir características da voz que você autorizou salvar; guarde-o com cuidado. Áudios baixados ficam separados.</p><p id="data-status" role="status"></p></div>
+        <div><span class="card-label">Dados no dispositivo</span><h3>Backup do histórico</h3><p>O backup JSON pode incluir características da voz; guarde-o com cuidado. Áudios não entram nele: exporte os exemplos à parte ou sincronize as gravações pelo Firebase. Apagar dados deste aparelho não apaga a cópia na nuvem.</p><p id="data-status" role="status"></p></div>
         <div class="data-actions"><button id="export-data" type="button">Exportar dados</button><button id="import-data" type="button">Importar backup</button><input id="import-file" type="file" accept="application/json,.json" hidden><button id="delete-data" type="button" class="danger-action">Apagar meus dados</button></div>
       </section>
     </section>
@@ -475,8 +510,12 @@
   <script src="/audio-context-fix.js?v=20260728-1"></script>
   <script src="/vendor/tf-1.7.4.min.js?v=20260728-1"></script>
   <script src="/vendor/speech-commands.min.js?v=20260728-1"></script>
+  <script src="voice-data.js?v=20260927-3"></script>
   <script src="voice-playback.js?v=20260927-2"></script>
-  <script src="script.js?v=20260927-2"></script>
+  <script src="script.js?v=20260927-3"></script>
+  <script src="personal-training.js?v=20260927-3"></script>
+  <script type="module" src="firebase-cloud.js?v=20260927-3"></script>
   <script src="functional-training.js?v=20260927-2"></script>
+  <script src="review-recordings.js?v=20260927-1"></script>
 </body>
 </html>
