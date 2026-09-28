@@ -562,6 +562,7 @@ function functionalSaveReview() {
   functionalAttempts = updated;
   document.getElementById("functional-note").value = "";
   functionalRenderHistory();
+  if (typeof updateReport === "function") updateReport();
   functionalMessage("Sua avaliação foi adicionada à tentativa mais recente desta frase.");
 }
 
@@ -681,6 +682,7 @@ function functionalSetReference() {
   functionalPromptIndex = Math.max(0, prompts.indexOf(attempt.prompt));
   functionalRenderExercise();
   functionalRenderHistory();
+  if (typeof updateReport === "function") updateReport();
   functionalMessage("Referência pessoal salva. A próxima tentativa desta frase receberá nota automática.");
 }
 

@@ -53,6 +53,8 @@ let modelLoadPromise = null;
 let tensorflowReadyPromise = null;
 let state = { tara: 0, iii: 0 };
 let modelListening = false;
+let reportRecordings = [];
+let reportRecordingRequest = 0;
 const PROFILE_KEY = "vocalizing-profile";
 const SETTINGS_KEY = "vocalizing-settings";
 const GUIDE_CONFIG = {
@@ -1575,13 +1577,26 @@ function localDateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function readDailyActivity(date) {
+function readDailyActivity(date, functionalAttempts, recordings) {
   let exercises = {}, twisters = {};
   const key = localDateKey(date);
   try { exercises = JSON.parse(localStorage.getItem("vocalizing-" + key) || "{}"); } catch (e) {}
   try { twisters = JSON.parse(localStorage.getItem("vocalizing-twisters-" + key) || "{}"); } catch (e) {}
-  const functional = readFunctionalAttempts().filter(item => item.at && localDateKey(new Date(item.at)) === key).length;
-  return { reps: (Number(exercises.tara) || 0) + (Number(exercises.iii) || 0), attempts: Number(twisters.attempts) || 0, functional };
+  const functional = functionalAttempts.filter(item => item.at && localDateKey(new Date(item.at)) === key).length;
+  const savedAudio = recordings.filter(item => item.at && localDateKey(new Date(item.at)) === key).length;
+  return { reps: (Number(exercises.tara) || 0) + (Number(exercises.iii) || 0), attempts: Number(twisters.attempts) || 0, functional, savedAudio };
+}
+
+async function refreshReportRecordings() {
+  const request = ++reportRecordingRequest;
+  try {
+    const recordings = await window.vocalizandoData.recordings();
+    if (request !== reportRecordingRequest) return;
+    reportRecordings = recordings;
+    updateReport();
+  } catch (error) {
+    console.warn("Gravações indisponíveis no relatório", error);
+  }
 }
 
 function readFunctionalAttempts() {
@@ -1603,22 +1618,123 @@ function readExerciseDay(date, key) {
   };
 }
 
-function renderExerciseHistory(days) {
+function renderExerciseHistory(days, functionalAttempts, functionalExercises, recordings) {
   const formatter = new Intl.DateTimeFormat("pt-BR", { weekday: "short" });
-  ["tara", "iii"].forEach(key => {
-    const container = document.getElementById(`history-${key}`);
-    if (!container) return;
-    container.innerHTML = days.map((day, index) => {
-      const result = readExerciseDay(day.date, key);
+  const counts = new Map();
+  const audioCounts = new Map();
+  for (const item of functionalAttempts) {
+    if (!item.at || !item.exercise) continue;
+    const key = `${localDateKey(new Date(item.at))}:${item.exercise}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  for (const item of recordings) {
+    if (!item.at || !item.kind) continue;
+    const key = `${localDateKey(new Date(item.at))}:${item.kind === "twister" ? "twister" : item.exercise}`;
+    audioCounts.set(key, (audioCounts.get(key) || 0) + 1);
+  }
+  function renderDays(container, details) {
+    container.replaceChildren();
+    days.forEach((day, index) => {
       const label = index === days.length - 1 ? "Hoje" : formatter.format(day.date).replace(".", "");
-      const confidence = result.confidence ? `${Math.round(result.confidence * 100)}%` : "—";
-      return `<div class="history-day"><span>${label}</span><strong>${result.reps}</strong><small>${confidence}</small></div>`;
-    }).join("");
+      const { count, extra } = details(day);
+      const cell = document.createElement("div");
+      cell.className = "history-day";
+      const dayLabel = document.createElement("span");
+      dayLabel.textContent = label;
+      const value = document.createElement("strong");
+      value.textContent = count;
+      const note = document.createElement("small");
+      note.textContent = extra || "\u00a0";
+      cell.setAttribute("aria-label", `${label}: ${count} tentativa(s)${extra ? `, ${extra}` : ""}`);
+      cell.append(dayLabel, value, note);
+      container.append(cell);
+    });
+  }
+  for (const key of ["tara", "iii"]) {
+    renderDays(document.getElementById(`history-${key}`), day => {
+      const result = readExerciseDay(day.date, key);
+      return { count: result.reps, extra: result.confidence ? `${Math.round(result.confidence * 100)}%` : "" };
+    });
+  }
+  renderDays(document.getElementById("history-twister"), day => {
+    const clips = audioCounts.get(`${localDateKey(day.date)}:twister`) || 0;
+    return { count: day.activity.attempts, extra: clips ? `${clips} áudio(s)` : "" };
   });
+  const functionalHistory = document.getElementById("history-functional");
+  functionalHistory.replaceChildren();
+  for (const exercise of functionalExercises) {
+    const row = document.createElement("div");
+    row.className = "history-row";
+    const name = document.createElement("strong");
+    name.textContent = exercise.name;
+    const cells = document.createElement("div");
+    cells.className = "history-days";
+    renderDays(cells, day => {
+      const key = `${localDateKey(day.date)}:${exercise.id}`;
+      const clips = audioCounts.get(key) || 0;
+      return { count: counts.get(key) || 0, extra: clips ? `${clips} áudio(s)` : "" };
+    });
+    row.append(name, cells);
+    functionalHistory.append(row);
+  }
+}
+
+function renderFunctionalReport(attempts, recordings, exercises) {
+  const list = document.getElementById("report-functional-list");
+  list.replaceChildren();
+  for (const exercise of exercises) {
+    const items = attempts.filter(item => item.exercise === exercise.id);
+    const clips = recordings.filter(item => item.kind === "functional" && item.exercise === exercise.id);
+    const scored = items.filter(item => Number.isFinite(item.score));
+    const reviewed = items.filter(item => ["all", "part", "none"].includes(item.listenerResult));
+    const understood = reviewed.filter(item => item.listenerResult === "all").length;
+    const latestReview = [...items].reverse().find(item => item.clarity != null || item.effort != null);
+    const row = document.createElement("div");
+    row.className = "functional-report-row";
+    row.dataset.exerciseId = exercise.id;
+    row.classList.toggle("has-practice", items.length > 0 || clips.length > 0);
+    const heading = document.createElement("div");
+    heading.className = "functional-report-name";
+    const link = document.createElement("a");
+    link.href = "#treino-funcional";
+    link.textContent = exercise.name;
+    link.addEventListener("click", () => {
+      const selector = document.getElementById("functional-exercise");
+      selector.value = exercise.id;
+      selector.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const note = document.createElement("small");
+    note.textContent = latestReview
+      ? `Sua avaliação: clareza ${latestReview.clarity ?? "—"}/10 · esforço ${latestReview.effort ?? "—"}/10`
+      : items.length || clips.length ? "Prática registrada hoje" : "Sem prática hoje";
+    heading.append(link, note);
+    const details = document.createElement("dl");
+    for (const [label, value] of [
+      ["Tentativas", String(items.length)],
+      ["Última semelhança", scored.length ? `${scored.at(-1).score}/100` : "Sem avaliação"],
+      ["Ouvinte", reviewed.length ? `${understood} de ${reviewed.length} completas` : "Sem retorno"],
+      ["Áudios salvos", String(clips.length)]
+    ]) {
+      const cell = document.createElement("div");
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const description = document.createElement("dd");
+      description.textContent = value;
+      cell.append(term, description);
+      details.append(cell);
+    }
+    row.append(heading, details);
+    list.append(row);
+  }
 }
 
 function updateReport() {
   if (!document.getElementById("overall-score")) return;
+  const today = localDateKey(new Date());
+  const functionalAttempts = readFunctionalAttempts();
+  const functionalToday = functionalAttempts.filter(item => item.at && localDateKey(new Date(item.at)) === today);
+  const recordingsToday = reportRecordings.filter(item => item.at && localDateKey(new Date(item.at)) === today);
+  const functionalExercises = typeof FUNCTIONAL_EXERCISES === "undefined" ? [] : FUNCTIONAL_EXERCISES;
   const goals = { tara: 15, iii: 20 };
   ["tara", "iii"].forEach(key => {
     const metric = state.metrics?.[key];
@@ -1634,11 +1750,20 @@ function updateReport() {
   const history = Array.isArray(tongueState.history) ? tongueState.history : [];
   const scoredHistory = history.filter(item => Number.isFinite(item.score));
   const twisterAverage = scoredHistory.length ? Math.round(scoredHistory.reduce((sum, item) => sum + item.score, 0) / scoredHistory.length) : null;
-  document.getElementById("report-twister-score").textContent = twisterAverage == null ? "—" : twisterAverage;
+  const twisterScore = document.getElementById("report-twister-score");
+  twisterScore.textContent = twisterAverage == null ? "—" : twisterAverage;
+  twisterScore.classList.toggle("is-unscored", twisterAverage == null);
   document.getElementById("report-twister-bar").style.width = (twisterAverage || 0) + "%";
   document.getElementById("report-twister-attempts").textContent = `${tongueState.attempts} hoje`;
   document.getElementById("report-twister-best").textContent = scoredHistory.length ? tongueState.best : "—";
-  const twisterTip = !tongueState.attempts
+  const twisterRecordings = recordingsToday.filter(item => item.kind === "twister");
+  const twisterReviews = twisterRecordings.filter(item => ["all", "part", "none"].includes(item.listenerResult));
+  const twisterUnderstood = twisterReviews.filter(item => item.listenerResult === "all").length;
+  document.getElementById("report-twister-recordings").textContent = twisterRecordings.length;
+  document.getElementById("report-twister-listener").textContent = twisterReviews.length ? `${twisterUnderstood} de ${twisterReviews.length} completas` : "Sem retorno";
+  const twisterTip = !tongueState.attempts && twisterRecordings.length
+    ? "Áudio guardado para revisão. Peça a um ouvinte que diga o que compreendeu; a transcrição não foi avaliada."
+    : !tongueState.attempts
     ? "Grave um desafio para receber uma orientação de dicção."
     : !scoredHistory.length
       ? "Sua prática foi registrada sem nota. Use pausas e o modo assistido na próxima tentativa."
@@ -1647,24 +1772,35 @@ function updateReport() {
         : "A transcrição se aproximou da frase. Isso não substitui o retorno de um ouvinte.";
   document.getElementById("report-twister-tip").textContent = twisterTip;
 
-  const functionalToday = readFunctionalAttempts().filter(item => item.at && localDateKey(new Date(item.at)) === localDateKey(new Date()));
   const listenerReviews = functionalToday.filter(item => ["all", "part", "none"].includes(item.listenerResult));
   const fullyUnderstood = listenerReviews.filter(item => item.listenerResult === "all").length;
-  document.getElementById("report-functional-summary").textContent = functionalToday.length
-    ? `Treino funcional: ${functionalToday.length} tentativas hoje · ${listenerReviews.length} avaliadas por ouvinte · ${fullyUnderstood} entendidas por inteiro.`
-    : "Treino funcional: nenhuma tentativa registrada hoje.";
-  const activeModes = [state.tara > 0, state.iii > 0, tongueState.attempts > 0, functionalToday.length > 0].filter(Boolean).length;
-  document.getElementById("overall-score").textContent = activeModes;
-  document.getElementById("overall-ring").style.setProperty("--score", (activeModes * 90) + "deg");
-  document.getElementById("overall-title").textContent = activeModes ? `${activeModes} de 4 atividades praticadas` : "Comece seu treino";
-  document.getElementById("overall-copy").textContent = activeModes ? "Veja abaixo repetições, confiança do modelo, transcrição e retorno de ouvintes separadamente." : "Repetições, trava-línguas e treino funcional aparecerão separadamente abaixo.";
+  const functionalRecordings = recordingsToday.filter(item => item.kind === "functional");
+  const knownFunctional = new Set(functionalExercises.map(item => item.id));
+  const practicedFunctional = new Set([...functionalToday.map(item => item.exercise), ...functionalRecordings.map(item => item.exercise)].filter(id => knownFunctional.has(id)));
+  const listenerSummary = listenerReviews.length ? ` · ${fullyUnderstood} de ${listenerReviews.length} compreendidas por inteiro` : "";
+  document.getElementById("report-functional-summary").textContent = functionalToday.length || functionalRecordings.length
+    ? `${practicedFunctional.size} de ${functionalExercises.length} focos praticados hoje · ${functionalToday.length} tentativas · ${functionalRecordings.length} áudios salvos${listenerSummary}.`
+    : "Nenhuma tentativa ou gravação registrada hoje. Os nove focos aparecem abaixo.";
+  renderFunctionalReport(functionalToday, functionalRecordings, functionalExercises);
+  const activeExercises = [state.tara > 0, state.iii > 0, tongueState.attempts > 0 || twisterRecordings.length > 0].filter(Boolean).length + practicedFunctional.size;
+  const totalExercises = 3 + functionalExercises.length;
+  document.getElementById("overall-score").textContent = activeExercises;
+  document.getElementById("overall-total").textContent = `/${totalExercises}`;
+  document.getElementById("overall-ring").style.setProperty("--score", (activeExercises / totalExercises * 360) + "deg");
+  document.getElementById("overall-title").textContent = activeExercises ? `${activeExercises} de ${totalExercises} exercícios praticados` : "Comece seu treino";
+  document.getElementById("overall-copy").textContent = activeExercises ? "Repetições, transcrição, semelhança acústica e retorno de ouvintes aparecem separados abaixo." : "Todas as atividades aparecerão aqui conforme você praticar.";
 
   const focusOptions = [
     { progress: state.tara / goals.tara, started: state.tara > 0, title: "Articulação do R e L", copy: document.getElementById("report-tara-tip").textContent, href: "#tara" },
     { progress: state.iii / goals.iii, started: state.iii > 0, title: "Sustentação e estabilidade", copy: document.getElementById("report-iii-tip").textContent, href: "#iii" },
-    { progress: tongueState.attempts / 3, started: tongueState.attempts > 0, title: "Trava-línguas", copy: twisterTip, href: "#trava-linguas" }
+    { progress: Math.max(tongueState.attempts, twisterRecordings.length) / 3, started: tongueState.attempts > 0 || twisterRecordings.length > 0, title: "Trava-línguas", copy: twisterTip, href: "#trava-linguas" }
   ];
   let focus = focusOptions.filter(item => item.started).sort((a, b) => a.progress - b.progress)[0];
+  if (!focus && practicedFunctional.size) {
+    const last = [...functionalToday, ...functionalRecordings].sort((a, b) => a.at.localeCompare(b.at)).at(-1);
+    const exercise = functionalExercises.find(item => item.id === last?.exercise);
+    if (exercise) focus = { title: exercise.name, copy: "Continue com uma frase desse foco e compare a compreensão com alguém de sua confiança.", href: "#treino-funcional" };
+  }
   if (!focus) {
     try {
       const profile = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}");
@@ -1688,8 +1824,9 @@ function updateReport() {
     const date = new Date();
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() - offset);
-    const activity = readDailyActivity(date);
-    days.push({ date, value: activity.reps + activity.attempts + activity.functional, active: activity.reps + activity.attempts + activity.functional > 0 });
+    const activity = readDailyActivity(date, functionalAttempts, reportRecordings);
+    const value = activity.reps + activity.attempts + activity.functional + activity.savedAudio;
+    days.push({ date, activity, value, active: value > 0 });
   }
   const maxValue = Math.max(35, ...days.map(day => day.value));
   document.getElementById("weekly-active-days").textContent = days.filter(day => day.active).length;
@@ -1698,7 +1835,7 @@ function updateReport() {
     const label = index === 6 ? "Hoje" : formatter.format(day.date).replace(".", "");
     return `<div class="week-day${day.active ? " active" : ""}"><span class="week-value">${day.value || "—"}</span><div class="week-track"><i style="height:${height}%"></i></div><small>${label}</small></div>`;
   }).join("");
-  renderExerciseHistory(days);
+  renderExerciseHistory(days, functionalAttempts, functionalExercises, reportRecordings);
   document.getElementById("report-date").textContent = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long" }).format(new Date());
 }
 
@@ -2041,6 +2178,8 @@ window.addEventListener("DOMContentLoaded", () => {
   initTongueTwisters();
   renderGuidedTraining();
   updateReport();
+  window.addEventListener("vocalizando-recordings-updated", refreshReportRecordings);
+  refreshReportRecordings();
   inspectPermissions();
   window.setTimeout(preloadExerciseModel, 250);
 

@@ -9,7 +9,7 @@
 
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=20260927-1">
+  <link rel="stylesheet" href="styles.css?v=20260928-2">
 </head>
 <body>
   <header class="site-header">
@@ -393,7 +393,7 @@
 
       <div class="report-summary">
         <article class="overall-card">
-          <div id="overall-ring" class="overall-ring"><div><strong id="overall-score">0</strong><span>/4</span></div></div>
+          <div id="overall-ring" class="overall-ring"><div><strong id="overall-score">0</strong><span id="overall-total">/12</span></div></div>
           <div><span class="card-label">Atividades de hoje</span><h3 id="overall-title">Comece seu treino</h3><p id="overall-copy">Repetições, trava-línguas e treino funcional aparecem separadamente abaixo.</p></div>
         </article>
         <article class="next-focus-card">
@@ -405,25 +405,28 @@
 
       <div class="performance-grid" aria-label="Desempenho por exercício">
         <article class="performance-card">
-          <div class="performance-head"><div><span class="exercise-tag">Articulação</span><h3>Tá Rá Lá</h3></div><strong id="report-tara-score" class="performance-score">0</strong></div>
+          <div class="performance-head"><div><span class="exercise-tag">Articulação</span><h3>Tá Rá Lá</h3></div><strong id="report-tara-score" class="performance-score repetition-score">0</strong></div>
           <div class="performance-bar"><span id="report-tara-bar"></span></div>
           <dl class="performance-details"><div><dt>Repetições</dt><dd id="report-tara-reps">0 de 15</dd></div><div><dt>Confiança média do modelo</dt><dd id="report-tara-confidence">—</dd></div></dl>
-          <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-tara-tip">Inicie o reconhecimento para avaliarmos sua articulação.</span></p></div>
+          <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-tara-tip">Inicie o reconhecimento para contar suas repetições.</span></p></div>
         </article>
         <article class="performance-card">
-          <div class="performance-head"><div><span class="exercise-tag alt">Sustentação</span><h3>III</h3></div><strong id="report-iii-score" class="performance-score">0</strong></div>
+          <div class="performance-head"><div><span class="exercise-tag alt">Sustentação</span><h3>III</h3></div><strong id="report-iii-score" class="performance-score repetition-score">0</strong></div>
           <div class="performance-bar"><span id="report-iii-bar"></span></div>
           <dl class="performance-details"><div><dt>Repetições</dt><dd id="report-iii-reps">0 de 20</dd></div><div><dt>Confiança média do modelo</dt><dd id="report-iii-confidence">—</dd></div></dl>
-          <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-iii-tip">Inicie o reconhecimento para avaliarmos sua sustentação.</span></p></div>
+          <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-iii-tip">Inicie o reconhecimento para contar suas repetições.</span></p></div>
         </article>
         <article class="performance-card">
-          <div class="performance-head"><div><span class="exercise-tag challenge">Dicção</span><h3>Trava-línguas</h3></div><strong id="report-twister-score" class="performance-score">—</strong></div>
+          <div class="performance-head"><div><span class="exercise-tag challenge">Transcrição</span><h3>Trava-línguas</h3></div><strong id="report-twister-score" class="performance-score">—</strong></div>
           <div class="performance-bar"><span id="report-twister-bar"></span></div>
-          <dl class="performance-details"><div><dt>Tentativas</dt><dd id="report-twister-attempts">0 hoje</dd></div><div><dt>Melhor correspondência da transcrição</dt><dd id="report-twister-best">—</dd></div></dl>
+          <dl class="performance-details"><div><dt>Tentativas transcritas</dt><dd id="report-twister-attempts">0 hoje</dd></div><div><dt>Melhor correspondência da transcrição</dt><dd id="report-twister-best">—</dd></div><div><dt>Áudios salvos hoje</dt><dd id="report-twister-recordings">0</dd></div><div><dt>Ouvinte</dt><dd id="report-twister-listener">Sem retorno</dd></div></dl>
           <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-twister-tip">Grave um desafio para receber uma orientação de dicção.</span></p></div>
         </article>
       </div>
-      <p id="report-functional-summary" class="report-functional-summary">Treino funcional: nenhuma tentativa registrada hoje.</p>
+      <section class="functional-report" aria-labelledby="functional-report-title">
+        <div class="functional-report-heading"><h3 id="functional-report-title">Treino funcional</h3><p id="report-functional-summary">Nenhuma tentativa registrada hoje.</p></div>
+        <div id="report-functional-list" class="functional-report-list"></div>
+      </section>
 
       <article class="weekly-card">
         <div class="weekly-head"><div><span class="card-label">Últimos 7 dias</span><h3>Constância de treino</h3></div><p><strong id="weekly-active-days">0</strong> dias ativos</p></div>
@@ -431,9 +434,11 @@
       </article>
 
       <article class="exercise-history">
-        <div class="weekly-head"><div><span class="card-label">Evolução por exercício</span><h3>Repetições e confiança</h3></div><p>Últimos 7 dias</p></div>
+        <div class="weekly-head"><div><span class="card-label">Evolução por exercício</span><h3>Tentativas registradas</h3></div><p>Últimos 7 dias</p></div>
         <div class="history-row"><strong>Tá Rá Lá</strong><div id="history-tara" class="history-days"></div></div>
         <div class="history-row"><strong>III</strong><div id="history-iii" class="history-days"></div></div>
+        <div class="history-row"><strong>Trava-línguas</strong><div id="history-twister" class="history-days"></div></div>
+        <div id="history-functional"></div>
       </article>
 
       <section class="data-panel" aria-label="Seus dados">
@@ -513,12 +518,12 @@
   <script src="/audio-context-fix.js?v=20260728-1"></script>
   <script src="/vendor/tf-1.7.4.min.js?v=20260728-1"></script>
   <script src="/vendor/speech-commands.min.js?v=20260728-1"></script>
-  <script src="voice-data.js?v=20260927-3"></script>
+  <script src="voice-data.js?v=20260928-2"></script>
   <script src="voice-playback.js?v=20260928-1"></script>
-  <script src="script.js?v=20260927-3"></script>
+  <script src="script.js?v=20260928-2"></script>
   <script src="personal-training.js?v=20260927-3"></script>
   <script type="module" src="firebase-cloud.js?v=20260927-3"></script>
-  <script src="functional-training.js?v=20260927-2"></script>
+  <script src="functional-training.js?v=20260928-2"></script>
   <script src="review-recordings.js?v=20260927-1"></script>
 </body>
 </html>

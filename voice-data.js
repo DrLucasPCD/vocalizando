@@ -39,11 +39,15 @@
     put: (key, value) => request("kv", "put", value, key),
     remove: key => request("kv", "delete", key),
     recordings: () => request("recordings", "getAll"),
-    saveRecording: value => request("recordings", "put", value),
+    saveRecording: async value => {
+      await request("recordings", "put", value);
+      window.dispatchEvent(new Event("vocalizando-recordings-updated"));
+    },
     deleteRecording: async id => {
       await request("recordings", "delete", id);
       const deleted = (await request("kv", "get", "deleted-recordings-v1")) || [];
       if (!deleted.includes(id)) await request("kv", "put", [...deleted, id], "deleted-recordings-v1");
+      window.dispatchEvent(new Event("vocalizando-recordings-updated"));
     },
     deletedRecordings: async () => (await request("kv", "get", "deleted-recordings-v1")) || [],
     clear: async () => {
