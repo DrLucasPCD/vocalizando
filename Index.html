@@ -9,7 +9,7 @@
 
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="styles.css?v=20260928-2">
+  <link rel="stylesheet" href="styles.css?v=20261011-1">
 </head>
 <body>
   <header class="site-header">
@@ -206,8 +206,8 @@
         <div class="personal-data-actions"><button id="personal-export" type="button" disabled>Exportar exemplos</button><button id="personal-import" type="button">Importar exemplos</button><input id="personal-import-file" type="file" accept=".bin,application/octet-stream" hidden><button id="personal-delete" type="button" disabled>Apagar treino</button></div>
         <div class="cloud-sync" aria-labelledby="cloud-title">
           <div class="personal-heading"><h4 id="cloud-title">Sincronizar entre aparelhos</h4><strong id="cloud-account">Desconectado</strong></div>
-          <p>Exemplos de voz e gravações de revisão podem ser guardados na sua conta Firebase. O envio exige sua autorização; o modelo treinado permanece neste aparelho.</p>
-          <label class="personal-consent"><input id="cloud-consent" type="checkbox"> Autorizo sincronizar meus exemplos de voz e gravações com minha conta Firebase.</label>
+          <p>Histórico, notas, referências, frases pessoais e gravações podem ser guardados na sua conta Firebase.</p>
+          <label class="personal-consent"><input id="cloud-consent" type="checkbox"> Autorizo sincronizar meu histórico, características da voz e gravações com minha conta Firebase.</label>
           <div class="personal-data-actions"><button id="cloud-login" type="button">Entrar com Google</button><button id="cloud-logout" type="button" hidden>Sair</button><button id="cloud-sync" type="button" disabled>Sincronizar agora</button><button id="cloud-delete" type="button" disabled>Apagar da nuvem</button></div>
           <div id="cloud-conflict" class="personal-data-actions" hidden><button id="cloud-use-local" type="button">Usar deste aparelho</button><button id="cloud-use-remote" type="button">Usar da nuvem</button></div>
           <p id="cloud-status" class="personal-status" role="status">Nenhuma gravação é enviada automaticamente.</p>
@@ -298,9 +298,19 @@
             <div class="functional-level" aria-hidden="true"><span id="functional-level-bar"></span></div>
             <span id="functional-live">Microfone desligado</span>
           </div>
+          <div class="functional-listening-settings">
+            <button id="functional-calibrate" type="button" class="functional-secondary">Calibrar minha voz</button>
+            <p id="functional-calibration-status" role="status">Sem calibração pessoal</p>
+            <label for="functional-sensitivity">Sensibilidade <output id="functional-sensitivity-value">100%</output></label>
+            <input id="functional-sensitivity" type="range" min="60" max="160" step="5" value="100">
+            <label for="functional-pause">Pausa entre tentativas <output id="functional-pause-value">2,5 s</output></label>
+            <input id="functional-pause" type="range" min="1" max="5" step="0.5" value="2.5">
+          </div>
           <div class="functional-score" aria-live="polite">
             <div><span>Nota de semelhança acústica</span><strong id="functional-score">—</strong></div>
             <p id="functional-score-detail">Grave uma tentativa e escolha uma referência para esta frase.</p>
+            <dl id="functional-attempt-measures" class="functional-attempt-measures"></dl>
+            <p id="functional-comparison" class="functional-guidance"></p>
             <button id="functional-set-reference" type="button" class="functional-secondary" disabled>Usar última tentativa como referência</button>
           </div>
           <div class="functional-actions functional-listen-actions">
@@ -419,7 +429,7 @@
         <article class="performance-card">
           <div class="performance-head"><div><span class="exercise-tag challenge">Transcrição</span><h3>Trava-línguas</h3></div><strong id="report-twister-score" class="performance-score">—</strong></div>
           <div class="performance-bar"><span id="report-twister-bar"></span></div>
-          <dl class="performance-details"><div><dt>Tentativas transcritas</dt><dd id="report-twister-attempts">0 hoje</dd></div><div><dt>Melhor correspondência da transcrição</dt><dd id="report-twister-best">—</dd></div><div><dt>Áudios salvos hoje</dt><dd id="report-twister-recordings">0</dd></div><div><dt>Ouvinte</dt><dd id="report-twister-listener">Sem retorno</dd></div></dl>
+          <dl class="performance-details"><div><dt>Tentativas registradas</dt><dd id="report-twister-attempts">0 hoje</dd></div><div><dt>Melhor correspondência da transcrição</dt><dd id="report-twister-best">—</dd></div><div><dt>Áudios salvos hoje</dt><dd id="report-twister-recordings">0</dd></div><div><dt>Ouvinte</dt><dd id="report-twister-listener">Sem retorno</dd></div></dl>
           <div class="improvement-note"><span aria-hidden="true">✦</span><p><strong>O que melhorar</strong><span id="report-twister-tip">Grave um desafio para receber uma orientação de dicção.</span></p></div>
         </article>
       </div>
@@ -518,12 +528,13 @@
   <script src="/audio-context-fix.js?v=20260728-1"></script>
   <script src="/vendor/tf-1.7.4.min.js?v=20260728-1"></script>
   <script src="/vendor/speech-commands.min.js?v=20260728-1"></script>
-  <script src="voice-data.js?v=20260928-2"></script>
+  <script src="practice-history.js?v=20261011-1"></script>
+  <script src="voice-data.js?v=20261011-1"></script>
   <script src="voice-playback.js?v=20260928-1"></script>
-  <script src="script.js?v=20260928-2"></script>
+  <script src="script.js?v=20261011-1"></script>
   <script src="personal-training.js?v=20260927-3"></script>
-  <script type="module" src="firebase-cloud.js?v=20260927-3"></script>
-  <script src="functional-training.js?v=20260928-2"></script>
-  <script src="review-recordings.js?v=20260927-1"></script>
+  <script type="module" src="firebase-cloud.js?v=20261011-1"></script>
+  <script src="functional-training.js?v=20261011-1"></script>
+  <script src="review-recordings.js?v=20261011-1"></script>
 </body>
 </html>

@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:voice": "node tools/build-voice.mjs"
+    "build:voice": "node tools/build-voice.mjs",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@diffusionstudio/piper-wasm": "1.0.0",

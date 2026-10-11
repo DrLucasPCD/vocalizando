@@ -53,6 +53,12 @@ let modelLoadPromise = null;
 let tensorflowReadyPromise = null;
 let state = { tara: 0, iii: 0 };
 let modelListening = false;
+let recognitionStarting = false;
+let recognitionInFlight = false;
+let recognitionStartToken = 0;
+let pronunciationStartToken = 0;
+let pronunciationFinished = true;
+let practiceDay = localDateKey(new Date());
 let reportRecordings = [];
 let reportRecordingRequest = 0;
 const PROFILE_KEY = "vocalizing-profile";
@@ -566,12 +572,19 @@ function bestPronunciationResult(target, candidates, assisted) {
 }
 
 function saveTongueProgress() {
-  localStorage.setItem(tongueStorageKey(), JSON.stringify({
-    best: tongueState.best,
-    streak: tongueState.streak,
-    attempts: tongueState.attempts,
-    history: tongueState.history
-  }));
+  try {
+    window.vocalizandoHistory.write(tongueStorageKey(), {
+      best: tongueState.best,
+      streak: tongueState.streak,
+      attempts: tongueState.attempts,
+      history: tongueState.history
+    });
+    return true;
+  } catch (error) {
+    loadTongueProgress();
+    showTongueError("Não foi possível salvar esta tentativa. Exporte seus dados e confira o espaço de armazenamento.");
+    return false;
+  }
 }
 
 function loadTongueProgress() {
@@ -836,13 +849,16 @@ async function requestMicrophoneAccess(requiresSpeechRecognition = true) {
 }
 
 function scoreFeedback(score) {
-  if (score >= 92) return ["Excelente articulação!", "A frase ficou completa e muito clara. Agora experimente aumentar um pouco a velocidade."];
-  if (score >= 75) return ["Muito bem!", "Você chegou bem perto. Repita articulando cada encontro consonantal."];
+  if (score >= 92) return ["Transcrição próxima da frase", "O navegador reconheceu quase todas as palavras. Compare também o que um ouvinte entendeu."];
+  if (score >= 75) return ["Boa correspondência da transcrição", "O navegador reconheceu boa parte das palavras. Você pode repetir a mesma frase para comparar."];
   if (score >= 50) return ["Prática registrada", "O navegador reconheceu boa parte da frase. Você pode continuar usando pausas entre os trechos."];
   return ["Tentativa registrada", "O navegador entendeu apenas uma parte. Isso não significa que sua fala esteja incorreta; tente por trechos ou repita com o modo assistido."];
 }
 
 function finishPronunciationAttempt() {
+  if (pronunciationFinished) return;
+  pronunciationFinished = true;
+  ensurePracticeDay();
   clearTimeout(tongueState.recognitionTimer);
   setPronunciationListening(false);
   const assisted = document.getElementById("assisted-recognition")?.checked !== false;
@@ -861,8 +877,8 @@ function finishPronunciationAttempt() {
   tongueState.best = Math.max(tongueState.best, score);
   tongueState.streak = score >= 75 ? tongueState.streak + 1 : 0;
   tongueState.attempts += 1;
-  tongueState.history.push({ score, focus: currentTwister().focus, transcript: spoken, assisted, at: Date.now() });
-  saveTongueProgress();
+  tongueState.history.push({ id: window.vocalizandoHistory.newId(), score, prompt: currentTwister().text, focus: currentTwister().focus, transcript: spoken, assisted, at: new Date().toISOString() });
+  if (!saveTongueProgress()) return;
   updateTongueStats();
 
   document.getElementById("score-empty").hidden = true;
@@ -876,9 +892,10 @@ function finishPronunciationAttempt() {
 }
 
 function registerUnscoredPractice() {
+  ensurePracticeDay();
   tongueState.attempts += 1;
-  tongueState.history.push({ score: null, focus: currentTwister().focus, assisted: true, unscored: true, at: Date.now() });
-  saveTongueProgress();
+  tongueState.history.push({ id: window.vocalizandoHistory.newId(), score: null, prompt: currentTwister().text, focus: currentTwister().focus, assisted: true, unscored: true, at: new Date().toISOString() });
+  if (!saveTongueProgress()) return;
   updateTongueStats();
   document.getElementById("register-practice").hidden = true;
   document.getElementById("twister-error").hidden = true;
@@ -892,11 +909,14 @@ function registerUnscoredPractice() {
   updateReport();
 }
 
-function stopPronunciation() {
-  if (!pronunciationRecognizer || !tongueState.listening) return;
+function stopPronunciation(reason = "stopped") {
+  pronunciationStartToken++;
+  document.getElementById("record-twister").disabled = false;
+  if (!pronunciationRecognizer || pronunciationFinished) return;
   tongueState.stopRequested = true;
   clearTimeout(tongueState.recognitionTimer);
   try { pronunciationRecognizer.stop(); } catch (e) { finishPronunciationAttempt(); }
+  if (reason === "background") finishPronunciationAttempt();
 }
 
 async function startPronunciation() {
@@ -905,6 +925,7 @@ async function startPronunciation() {
     stopPronunciation();
     return;
   }
+  const token = ++pronunciationStartToken;
 
   if (typeof functionalListening !== "undefined" && functionalListening) functionalStopRecording();
 
@@ -927,19 +948,23 @@ async function startPronunciation() {
   tongueState.recognitionRestarts = 0;
   tongueState.recognitionDeadline = Date.now() + 18000;
   resetScorePanel();
-
+  document.getElementById("record-twister").disabled = true;
   const microphoneReady = await requestMicrophoneAccess();
+  if (token !== pronunciationStartToken || document.hidden) return;
+  document.getElementById("record-twister").disabled = false;
   if (!microphoneReady) return;
 
   const recognition = new SpeechRecognition();
   pronunciationRecognizer = recognition;
+  pronunciationFinished = false;
   const assisted = document.getElementById("assisted-recognition")?.checked !== false;
   recognition.lang = "pt-BR";
   recognition.continuous = assisted;
   recognition.interimResults = assisted || !isSafariBrowser();
   recognition.maxAlternatives = assisted ? 5 : 1;
-  recognition.onstart = () => setPronunciationListening(true);
+  recognition.onstart = () => { if (token !== pronunciationStartToken || document.hidden) { stopPronunciation("background"); return; } setPronunciationListening(true); };
   recognition.onresult = (event) => {
+    if (pronunciationFinished || token !== pronunciationStartToken) return;
     let interim = "";
     for (let i = event.resultIndex || 0; i < event.results.length; i++) {
       const speechResult = event.results[i];
@@ -974,7 +999,8 @@ async function startPronunciation() {
     showTongueError(messages[event.error] || "Não consegui reconhecer sua voz. Tente em um lugar mais silencioso.");
   };
   recognition.onend = () => {
-    if (tongueState.stopRequested || tongueState.hadError || !assisted || Date.now() >= tongueState.recognitionDeadline || tongueState.recognitionRestarts >= 3) {
+    if (pronunciationFinished) return;
+    if (document.hidden || token !== pronunciationStartToken || tongueState.stopRequested || tongueState.hadError || !assisted || Date.now() >= tongueState.recognitionDeadline || tongueState.recognitionRestarts >= 3) {
       finishPronunciationAttempt();
       return;
     }
@@ -1370,16 +1396,18 @@ function handleGuidedRepetition(key) {
 }
 
 function adjustExerciseCount(key, delta) {
+  ensurePracticeDay();
   const target = Object.values(TARGETS).find(item => item.key === key);
   if (!target) return;
   const previous = state[key];
-  state[key] = Math.max(0, Math.min(target.goal, state[key] + delta));
+  if (delta > 0 && previous >= target.goal) return;
+  state[key] = Math.max(0, state[key] + delta);
   if (state[key] === previous) return;
   state.manual = state.manual || { tara: 0, iii: 0 };
   const metric = state.metrics[key];
   if (delta > 0) {
+    state.lastSource = "manual";
     state.manual[key] = (Number(state.manual[key]) || 0) + 1;
-    handleGuidedRepetition(key);
   } else if (state.manual[key] > 0) {
     state.manual[key]--;
   } else if (metric.accepted > 0) {
@@ -1388,9 +1416,10 @@ function adjustExerciseCount(key, delta) {
     metric.confidenceSum = Math.max(0, metric.confidenceSum - average);
     if (!metric.accepted) metric.bestConfidence = 0;
   }
+  if (!saveCounts()) return;
+  if (delta > 0) handleGuidedRepetition(key);
   updateProgressUI();
   renderGuidedTraining();
-  saveCounts();
   updateReport();
   setFeedback(key, delta > 0 ? "Repetição adicionada manualmente." : "Contagem corrigida.", "good");
 }
@@ -1422,7 +1451,7 @@ function saveAssessment() {
     saved: true,
     updatedAt: Date.now()
   };
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  window.vocalizandoHistory.write(PROFILE_KEY, profile);
   document.getElementById("assessment-result").textContent = assessmentSuggestion(profile).text;
   updateReport();
 }
@@ -1435,10 +1464,10 @@ function loadSettings() {
 }
 
 function saveSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+  window.vocalizandoHistory.write(SETTINGS_KEY, {
     assisted: document.getElementById("assisted-recognition").checked,
     speed: document.getElementById("twister-speed").value
-  }));
+  });
 }
 
 function setPermissionStatus(id, status, type = "") {
@@ -1483,7 +1512,7 @@ function exportVocalizingData() {
       catch (e) { data[key] = localStorage.getItem(key); }
     }
   }
-  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data }, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data, history: window.vocalizandoHistory.snapshot() }, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
   link.download = `vocalizando-${localDateKey(new Date())}.json`;
@@ -1494,7 +1523,7 @@ function exportVocalizingData() {
 }
 
 function validBackupKey(key) {
-  return /^vocalizing-(?:\d{4}-\d{2}-\d{2}|twisters-\d{4}-\d{2}-\d{2}|profile|settings|functional-(?:v1|baseline-v1|targets-v1|references-v1))$/.test(key);
+  return /^vocalizing-(?:\d{4}-\d{2}-\d{2}|twisters-\d{4}-\d{2}-\d{2}|profile|settings|listening-v1|functional-(?:v1|baseline-v1|targets-v1|references-v1))$/.test(key);
 }
 
 async function importVocalizingData(event) {
@@ -1503,13 +1532,15 @@ async function importVocalizingData(event) {
   if (!file) return;
   const status = document.getElementById("data-status");
   try {
-    if (file.size > 5 * 1024 * 1024) throw new Error("O backup excede 5 MB.");
+    if (file.size > 25 * 1024 * 1024) throw new Error("O backup excede 25 MB.");
     const backup = JSON.parse(await file.text());
     if (!backup || typeof backup !== "object" || !backup.data || typeof backup.data !== "object" || Array.isArray(backup.data)) throw new Error("Arquivo de backup inválido.");
     const entries = Object.entries(backup.data);
+    if (backup.history) window.vocalizandoHistory.validate(backup.history);
     if (!entries.length || entries.some(([key, value]) => !validBackupKey(key) || !value || typeof value !== "object")) throw new Error("O backup contém dados desconhecidos ou inválidos.");
     if (!window.confirm(`Substituir os dados deste navegador pelos ${entries.length} registros do backup? Exporte os dados atuais antes de continuar.`)) return;
     const previous = {};
+    const previousHistory = localStorage.getItem("vocalizing-history-v2");
     for (let index = 0; index < localStorage.length; index++) {
       const key = localStorage.key(index);
       if (validBackupKey(key)) previous[key] = localStorage.getItem(key);
@@ -1517,9 +1548,15 @@ async function importVocalizingData(event) {
     try {
       Object.keys(previous).forEach(key => localStorage.removeItem(key));
       entries.forEach(([key, value]) => localStorage.setItem(key, JSON.stringify(value)));
+      if (backup.history) window.vocalizandoHistory.replace(backup.history);
+      else window.vocalizandoHistory.migrate(true);
     } catch (error) {
       entries.forEach(([key]) => localStorage.removeItem(key));
       Object.entries(previous).forEach(([key, value]) => localStorage.setItem(key, value));
+      if (previousHistory) localStorage.setItem("vocalizing-history-v2", previousHistory);
+      else localStorage.removeItem("vocalizing-history-v2");
+      refreshPracticeData();
+      functionalReloadData();
       throw new Error("Não houve espaço para importar. Os dados anteriores foram restaurados.");
     }
     location.reload();
@@ -1563,7 +1600,14 @@ function loadCounts() {
 }
 
 function saveCounts() {
-  localStorage.setItem(todayKey(), JSON.stringify(state));
+  try { window.vocalizandoHistory.write(todayKey(), state); return true; }
+  catch (error) {
+    loadCounts();
+    updateProgressUI();
+    updateReport();
+    for (const key of ["tara", "iii"]) setFeedback(key, "Não foi possível salvar. Exporte seus dados e confira o espaço de armazenamento.", "low");
+    return false;
+  }
 }
 
 function reportTip(key, completion, confidence) {
@@ -1825,8 +1869,8 @@ function updateReport() {
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() - offset);
     const activity = readDailyActivity(date, functionalAttempts, reportRecordings);
-    const value = activity.reps + activity.attempts + activity.functional + activity.savedAudio;
-    days.push({ date, activity, value, active: value > 0 });
+    const value = activity.reps + activity.attempts + activity.functional;
+    days.push({ date, activity, value, active: value > 0 || activity.savedAudio > 0 });
   }
   const maxValue = Math.max(35, ...days.map(day => day.value));
   document.getElementById("weekly-active-days").textContent = days.filter(day => day.active).length;
@@ -1968,13 +2012,16 @@ function resetDetectionCycle() {
 
 async function startRecognition() {
   window.vocalizandoVoice?.stop();
-  if (modelListening) {
+  if (recognitionInFlight) return;
+  if (modelListening || recognitionStarting) {
     if (guided.active) stopGuidedTraining(false);
     stopRecognition();
     return;
   }
 
   if (typeof functionalListening !== "undefined" && functionalListening) functionalStopRecording();
+  if (typeof functionalCancelCalibration === "function") functionalCancelCalibration();
+  window.vocalizandoReview?.stop();
   if (tongueState.listening) stopPronunciation();
   const modelStatus = document.querySelector("#model-status span");
   const debug = document.querySelector("#debug");
@@ -1984,6 +2031,10 @@ async function startRecognition() {
     debug.textContent = "O navegador não permite usar o microfone nesta página.";
     return;
   }
+  const token = ++recognitionStartToken;
+  recognitionStarting = true;
+  recognitionInFlight = true;
+  document.getElementById("start-btn").disabled = true;
 
   try {
     if (!recognizer || !modelLoadPromise) {
@@ -1991,15 +2042,21 @@ async function startRecognition() {
     }
     await createModel();
   } catch (e) {
+    recognitionInFlight = false;
+    if (token !== recognitionStartToken) { document.getElementById("start-btn").disabled = false; return; }
     modelStatus.textContent = "Erro ao carregar";
     const detail = e && e.message ? ` (${e.message})` : "";
     debug.textContent = `Não foi possível iniciar o modelo${detail}`;
     console.error("Falha ao carregar o modelo de exercícios.", e);
+    recognitionStarting = false;
+    document.getElementById("start-btn").disabled = false;
     return;
   }
+  if (token !== recognitionStartToken || document.hidden) { recognitionInFlight = false; stopRecognition(); return; }
 
   try { await window.vocalizandoPersonal?.ready(); }
   catch (error) { console.warn("Usando modelo original", error); }
+  if (token !== recognitionStartToken || document.hidden) { recognitionInFlight = false; stopRecognition(); return; }
   const activeRecognizer = window.vocalizandoPersonal?.activeRecognizer() || recognizer;
   const personalActive = activeRecognizer !== recognizer;
   const threshold = personalActive ? 0.80 : THRESHOLD;
@@ -2009,6 +2066,8 @@ async function startRecognition() {
 
   try {
     await activeRecognizer.listen(result => {
+      if (token !== recognitionStartToken || document.hidden) return;
+      ensurePracticeDay();
       const labels = activeRecognizer.wordLabels();
       const scores = result.scores;
       const idx    = scores.indexOf(Math.max(...scores));
@@ -2076,6 +2135,8 @@ async function startRecognition() {
 
       const key = detectionCycle.candidateKey;
       const acceptedConfidence = detectionCycle.candidateConfidenceSum / detectionCycle.candidateFrames;
+      state.lastSource = "auto";
+      state.lastConfidence = acceptedConfidence;
 
       if (key === "tara" && state.tara < TARGETS[EX_TARA_LABEL].goal) {
         state.tara++;
@@ -2101,10 +2162,10 @@ async function startRecognition() {
       detectionCycle.releaseFrames = 0;
       detectionCycle.lastCountAt = now;
       resetDetectionCandidate();
+      if (!saveCounts()) return;
       handleGuidedRepetition(key);
       updateProgressUI();
       renderGuidedTraining();
-      saveCounts();
       updateReport();
     }, {
       includeSpectrogram: false,
@@ -2119,6 +2180,7 @@ async function startRecognition() {
       }
     });
 
+    if (token !== recognitionStartToken || document.hidden) { activeRecognizer.stopListening(); return; }
     listeningRecognizer = activeRecognizer;
     modelStatus.textContent = personalActive ? "Personalizado" : "Pronto";
     debug.textContent = "Escutando…";
@@ -2132,10 +2194,20 @@ async function startRecognition() {
       ? "No iPhone, permita o microfone em Ajustes > Safari e toque novamente."
       : "Não foi possível iniciar o microfone. Verifique a permissão e tente novamente.";
     console.error("Falha ao iniciar o reconhecimento dos exercícios.", error);
+  } finally {
+    recognitionInFlight = false;
+    document.getElementById("start-btn").disabled = false;
+    if (token === recognitionStartToken) {
+      recognitionStarting = false;
+      document.getElementById("start-btn").disabled = false;
+    }
   }
 }
 
 function stopRecognition() {
+  recognitionStartToken++;
+  recognitionStarting = false;
+  document.getElementById("start-btn").disabled = recognitionInFlight;
   try {
     if (listeningRecognizer && typeof listeningRecognizer.stopListening === "function") listeningRecognizer.stopListening();
   } catch (e) {}
@@ -2145,7 +2217,40 @@ function stopRecognition() {
   document.querySelector("#debug").textContent = "Reconhecimento pausado.";
 }
 
+function refreshPracticeData() {
+  loadCounts();
+  loadTongueProgress();
+  loadSettings();
+  loadAssessment();
+  updateProgressUI();
+  renderGuidedTraining();
+  updateReport();
+}
+
+function ensurePracticeDay() {
+  const today = localDateKey(new Date());
+  if (practiceDay === today) return;
+  practiceDay = today;
+  if (guided.active) stopGuidedTraining(false);
+  refreshPracticeData();
+  if (typeof functionalReloadData === "function") functionalReloadData();
+}
+
+function pausePractice(reason = "background") {
+  if (modelListening || recognitionStarting) stopRecognition();
+  stopPronunciation(reason);
+  if (guided.active) stopGuidedTraining(false);
+  if (typeof functionalCancelCalibration === "function") functionalCancelCalibration();
+  if (typeof functionalPauseTimer === "function") functionalPauseTimer();
+  if (typeof functionalListening !== "undefined" && (functionalListening || functionalStarting)) functionalStopRecording(reason);
+  const saving = window.vocalizandoReview?.stop();
+  window.vocalizandoVoice?.stop();
+  return saving;
+}
+window.vocalizandoLifecycle = { pause: pausePractice };
+
 function reset(exKey) {
+  ensurePracticeDay();
   state[exKey] = 0;
   state.metrics[exKey] = { accepted: 0, confidenceSum: 0, bestConfidence: 0 };
   state.manual[exKey] = 0;
@@ -2155,13 +2260,25 @@ function reset(exKey) {
     stopGuidedTraining(false);
   }
   updateProgressUI();
-  saveCounts();
+  if (!saveCounts()) return;
   setFeedback(exKey, "Reiniciado. Bora de novo!");
   updateReport();
 }
 
 /* ---- bootstrap ---- */
 window.addEventListener("DOMContentLoaded", () => {
+  window.addEventListener("vocalizando-history-updated", refreshPracticeData);
+  window.addEventListener("pagehide", () => pausePractice());
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) pausePractice();
+    else {
+      ensurePracticeDay();
+      inspectPermissions();
+    }
+  });
+  window.addEventListener("storage", event => {
+    if (event.key === "vocalizing-history-v2") { refreshPracticeData(); if (typeof functionalReloadData === "function") functionalReloadData(); }
+  });
   TARGETS[EX_TARA_LABEL].span = document.getElementById("tara-count");
   TARGETS[EX_III_LABEL].span  = document.getElementById("iii-count");
   TARGETS[EX_TARA_LABEL].bar = document.getElementById("tara-bar");

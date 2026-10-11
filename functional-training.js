@@ -91,6 +91,9 @@ let functionalSegment = null;
 let functionalLastSampleAt = 0;
 let functionalAudio = new Map();
 let functionalSavedUrls = [];
+let functionalSession = null;
+let functionalListeningSettings = { sensitivity: 100, pause: 2.5, calibration: null };
+let functionalCalibration = null;
 
 function functionalRead(key, fallback) {
   try {
@@ -103,7 +106,7 @@ function functionalRead(key, fallback) {
 
 function functionalPersist(key, value) {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    window.vocalizandoHistory.write(key, value);
     return true;
   } catch (error) {
     functionalMessage("Não foi possível salvar neste navegador. Exporte seus dados antes de fechar a página.");
@@ -225,21 +228,26 @@ function functionalRenderAudio() {
       try {
         save.disabled = true;
         await window.vocalizandoData.saveRecording({
-          id: `functional-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          id: item.id,
           kind: "functional",
           at: item.at,
           updatedAt: new Date().toISOString(),
           exercise: FUNCTIONAL_EXERCISES[functionalIndex].id,
           prompt: item.prompt,
           version,
+          attemptIds: item.attemptIds,
           blob: item.blob
         });
-        functionalMessage("Gravação guardada neste navegador. Use Sincronizar agora para enviá-la à sua conta.");
+        item.saved = true;
+        save.textContent = "Áudio guardado";
+        functionalMessage("Gravação ligada às tentativas e guardada neste navegador.");
         functionalRenderSavedAudio();
       } catch (error) {
         functionalMessage(`Não foi possível guardar o áudio: ${error.message}.`);
-      } finally { save.disabled = false; }
+      } finally { save.disabled = !!item.saved; }
     });
+    save.disabled = !!item.saved;
+    if (item.saved) save.textContent = "Áudio guardado";
     row.append(label, player, download, save);
     list.appendChild(row);
   }
@@ -333,12 +341,19 @@ function functionalCountAttempt(source, voicedMs = null, signature = null) {
   const prompt = functionalPrompts(exercise)[functionalPromptIndex];
   const reference = functionalReferences[functionalReferenceKey(exercise.id, prompt)];
   const attempt = {
+    id: window.vocalizandoHistory.newId(),
     at: new Date().toISOString(),
     exercise: exercise.id,
     prompt,
     source,
     voicedMs,
-    score: signature && reference ? functionalAcousticScore(signature, reference) : null,
+    durationMs: signature?.durationMs ?? null,
+    pauseMs: signature?.pauseMs ?? null,
+    quality: signature?.quality ?? null,
+    captureProfile: window.vocalizandoHistory.deviceId,
+    referenceId: reference?.id || reference?.basedOn || null,
+    sessionId: functionalSession?.id || null,
+    score: signature && signature.quality?.usable !== false && reference && functionalComparablePrompt(exercise, prompt) ? functionalAcousticScore(signature, reference) : null,
     clarity: null,
     effort: null,
     note: ""
@@ -346,7 +361,8 @@ function functionalCountAttempt(source, voicedMs = null, signature = null) {
   const next = [...functionalAttempts, attempt];
   if (!functionalPersist(FUNCTIONAL_STORAGE, next)) return false;
   functionalAttempts = next;
-  functionalLastSignature = signature ? { at: attempt.at, exercise: exercise.id, prompt, signature } : null;
+  if (source === "auto" && functionalSession) functionalSession.attemptIds.push(attempt.id);
+  functionalLastSignature = signature ? { id: attempt.id, at: attempt.at, exercise: exercise.id, prompt, signature } : null;
   document.getElementById("functional-consent-features").checked = false;
   functionalRenderExercise();
   functionalRenderHistory();
@@ -365,10 +381,15 @@ function functionalFinishSegment() {
   const minimumMs = exercise.id === "transferencia" ? 1800 : ["respiracao", "voz"].includes(exercise.id) ? 500 : 250;
   if (segment.voicedMs >= minimumMs) {
     while (segment.frames[segment.frames.length - 1] === null) segment.frames.pop();
+    const durationMs = Math.round(segment.lastSoundAt - segment.startedAt + 70);
+    const snrDb = 20 * Math.log10(segment.rmsSum / Math.max(1, segment.samples) / Math.max(0.00005, segment.noiseFloor));
+    const clipping = segment.clippingSum / Math.max(1, segment.samples);
     const signature = segment.frames.length >= 4 ? {
       frames: segment.frames,
-      durationMs: Math.round(segment.lastSoundAt - segment.startedAt + 70),
-      voicedMs: Math.round(segment.voicedMs)
+      durationMs,
+      voicedMs: Math.round(segment.voicedMs),
+      pauseMs: Math.max(0, durationMs - Math.round(segment.voicedMs)),
+      quality: { snrDb: Math.round(snrDb), clipping, usable: snrDb >= 6 && clipping < 0.05 }
     } : null;
     functionalCountAttempt("auto", Math.round(segment.voicedMs), signature);
   }
@@ -383,11 +404,11 @@ function functionalSpectrum(analyser, frequencies, bands) {
     return Math.sqrt(power / Math.max(1, end - start));
   });
   const total = values.reduce((sum, value) => sum + value, 0);
-  return values.map(value => Math.round(value / total * 10000) / 10000);
+  return values.map(value => total ? Math.round(value / total * 10000) / 10000 : 0);
 }
 
 function functionalObserveAudio(analyser) {
-  const samples = new Uint8Array(analyser.fftSize);
+  const samples = new Float32Array(analyser.fftSize);
   const frequencies = new Float32Array(analyser.frequencyBinCount);
   const edges = [80, 150, 240, 360, 540, 800, 1200, 1800, 2700, 4000, 6000];
   const bands = edges.slice(0, -1).map((start, index) => [
@@ -396,26 +417,31 @@ function functionalObserveAudio(analyser) {
   ]);
   functionalMonitor = setInterval(() => {
     if (!functionalListening) return;
-    analyser.getByteTimeDomainData(samples);
+    analyser.getFloatTimeDomainData(samples);
     let power = 0;
-    for (const sample of samples) power += ((sample - 128) / 128) ** 2;
+    let clipped = 0;
+    for (const sample of samples) { power += sample ** 2; if (Math.abs(sample) >= 0.98) clipped++; }
     const rms = Math.sqrt(power / samples.length);
     const now = performance.now();
     const elapsed = functionalLastSampleAt ? Math.min(150, now - functionalLastSampleAt) : 70;
     functionalLastSampleAt = now;
     document.getElementById("functional-level-bar").style.width = `${Math.min(100, Math.round(rms / 0.08 * 100))}%`;
-    const threshold = Math.max(0.004, functionalNoiseFloor * 2);
+    const calibrated = functionalListeningSettings.calibration?.threshold || 0.002;
+    const threshold = Math.max(0.0006, functionalNoiseFloor * 1.6, calibrated * 100 / functionalListeningSettings.sensitivity);
     if (rms >= threshold) {
       if (!functionalSegment) {
-        functionalSegment = { voicedMs: 0, startedAt: now, lastSoundAt: now, frames: [] };
+        functionalSegment = { voicedMs: 0, startedAt: now, lastSoundAt: now, frames: [], rmsSum: 0, clippingSum: 0, samples: 0, noiseFloor: functionalNoiseFloor };
         functionalMicStatus("Som captado", true);
       }
       functionalSegment.voicedMs += elapsed;
+      functionalSegment.rmsSum += rms;
+      functionalSegment.clippingSum += clipped / samples.length;
+      functionalSegment.samples++;
       functionalSegment.lastSoundAt = now;
       functionalSegment.frames.push(functionalSpectrum(analyser, frequencies, bands));
     } else if (functionalSegment) {
       const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
-      const gapMs = exercise.id === "transferencia" ? 5000 : ["ritmo", "prosodia", "voz"].includes(exercise.id) ? 1500 : 1000;
+      const gapMs = Math.max(functionalListeningSettings.pause, exercise.id === "transferencia" ? 3 : 1) * 1000;
       if (now - functionalSegment.lastSoundAt >= gapMs) functionalFinishSegment();
       else functionalSegment.frames.push(null);
     } else {
@@ -425,7 +451,15 @@ function functionalObserveAudio(analyser) {
   }, 70);
 }
 
+function functionalConnectOutput(analyser) {
+  const muted = analyser.context.createGain();
+  muted.gain.value = 0;
+  analyser.connect(muted);
+  muted.connect(analyser.context.destination);
+}
+
 async function functionalStartRecording() {
+  functionalCancelCalibration();
   window.vocalizandoVoice?.stop();
   if (functionalListening || functionalStarting) return;
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -448,16 +482,16 @@ async function functionalStartRecording() {
   try {
     if (typeof modelListening !== "undefined" && modelListening) stopRecognition();
     if (typeof tongueState !== "undefined" && tongueState.listening) stopPronunciation();
+    window.vocalizandoReview?.stop();
     context = new AudioContextClass();
     const resume = context.resume().catch(error => error);
     stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 }, video: false });
-    const resumeError = await resume;
-    if (resumeError) throw resumeError;
     if (token !== functionalStartToken) {
       stream.getTracks().forEach(track => track.stop());
       await context.close();
       return;
     }
+    if (document.hidden) { stream.getTracks().forEach(track => track.stop()); await context.close(); return; }
     functionalStream = stream;
     functionalAudioContext = context;
     const source = context.createMediaStreamSource(stream);
@@ -468,11 +502,19 @@ async function functionalStartRecording() {
     analyser.fftSize = 2048;
     source.connect(filter);
     filter.connect(analyser);
-    functionalNoiseFloor = 0.002;
+    functionalConnectOutput(analyser);
+    const resumeError = await resume;
+    if (resumeError) throw resumeError;
+    if (token !== functionalStartToken || document.hidden) { stream.getTracks().forEach(track => track.stop()); await context.close(); return; }
+    functionalNoiseFloor = functionalListeningSettings.calibration?.noiseFloor || 0.0005;
     functionalSegment = null;
     functionalLastSampleAt = 0;
     functionalListening = true;
+    functionalSession = { id: window.vocalizandoHistory.newId(), attemptIds: [] };
     functionalObserveAudio(analyser);
+    context.addEventListener("statechange", () => {
+      if (functionalListening && context.state !== "running") functionalStopRecording("interrupted");
+    });
     stream.getAudioTracks()[0]?.addEventListener("ended", () => {
       if (functionalListening) {
         functionalStopRecording("interrupted");
@@ -487,6 +529,7 @@ async function functionalStartRecording() {
         const version = document.getElementById("functional-version").value;
         const exerciseId = FUNCTIONAL_EXERCISES[functionalIndex].id;
         const prompt = functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex])[functionalPromptIndex];
+        const session = functionalSession;
         const chunks = [];
         recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
         recorder.onstop = () => {
@@ -496,7 +539,7 @@ async function functionalStartRecording() {
           const key = `${exerciseId}:${version}`;
           const previous = functionalAudio.get(key);
           if (previous) URL.revokeObjectURL(previous.url);
-          functionalAudio.set(key, { url: URL.createObjectURL(blob), blob, at: new Date().toISOString(), prompt, extension: blob.type.includes("webm") ? "webm" : "m4a" });
+          functionalAudio.set(key, { id: `functional-${session.id}`, attemptIds: [...session.attemptIds], url: URL.createObjectURL(blob), blob, at: new Date().toISOString(), prompt, extension: blob.type.includes("webm") ? "webm" : "m4a" });
           functionalRenderAudio();
         };
         recorder.start();
@@ -535,6 +578,7 @@ function functionalStopRecording(reason = "stopped") {
   if (functionalMonitor) clearInterval(functionalMonitor);
   functionalMonitor = null;
   functionalFinishSegment();
+  functionalSession = null;
   if (functionalRecorder?.state === "recording") functionalRecorder.stop();
   functionalStream?.getTracks().forEach(track => track.stop());
   functionalStream = null;
@@ -546,7 +590,89 @@ function functionalStopRecording(reason = "stopped") {
   document.getElementById("functional-stop").disabled = true;
   document.getElementById("functional-level-bar").style.width = "0%";
   functionalMicStatus(reason === "background" ? "Pausado ao sair do app" : reason === "interrupted" ? "Microfone interrompido" : "Microfone desligado");
-  if (reason === "background") functionalMessage("Escuta pausada ao sair do app. Toque em Iniciar escuta para continuar.");
+  if (reason === "background" || reason === "interrupted") functionalMessage("Escuta interrompida. As tentativas detectadas foram salvas; toque em Iniciar escuta para continuar.");
+}
+
+function functionalRenderListeningSettings() {
+  document.getElementById("functional-sensitivity").value = functionalListeningSettings.sensitivity;
+  document.getElementById("functional-sensitivity-value").textContent = `${functionalListeningSettings.sensitivity}%`;
+  document.getElementById("functional-pause").value = functionalListeningSettings.pause;
+  document.getElementById("functional-pause-value").textContent = `${String(functionalListeningSettings.pause).replace(".", ",")} s`;
+  const calibration = functionalListeningSettings.calibration;
+  document.getElementById("functional-calibration-status").textContent = calibration ? `Voz calibrada neste aparelho em ${new Date(calibration.at).toLocaleDateString("pt-BR")}` : "Sem calibração pessoal neste aparelho";
+}
+
+function functionalCancelCalibration() {
+  if (!functionalCalibration) return;
+  functionalCalibration.cancelled = true;
+  clearInterval(functionalCalibration.timer);
+  functionalCalibration.stream?.getTracks().forEach(track => track.stop());
+  functionalCalibration.context?.close().catch(() => {});
+  functionalCalibration = null;
+  document.getElementById("functional-calibrate").textContent = "Calibrar minha voz";
+  functionalRenderListeningSettings();
+}
+
+async function functionalCalibrate() {
+  if (functionalCalibration) { functionalCancelCalibration(); return; }
+  functionalStopRecording();
+  window.vocalizandoVoice?.stop();
+  if (typeof modelListening !== "undefined" && modelListening) stopRecognition();
+  if (typeof tongueState !== "undefined" && tongueState.listening) stopPronunciation();
+  window.vocalizandoReview?.stop();
+  const task = { cancelled: false, quiet: [], voice: [] };
+  functionalCalibration = task;
+  document.getElementById("functional-calibrate").textContent = "Cancelar calibração";
+  const status = document.getElementById("functional-calibration-status");
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    task.context = new AudioContextClass();
+    const resumed = task.context.resume().catch(error => error);
+    task.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 }, video: false });
+    if (task.cancelled || document.hidden) { task.stream.getTracks().forEach(track => track.stop()); return; }
+    const analyser = task.context.createAnalyser();
+    analyser.fftSize = 2048;
+    task.context.createMediaStreamSource(task.stream).connect(analyser);
+    functionalConnectOutput(analyser);
+    const resumeError = await resumed;
+    if (resumeError) throw resumeError;
+    if (task.cancelled || document.hidden) { task.stream.getTracks().forEach(track => track.stop()); return; }
+    const samples = new Float32Array(analyser.fftSize);
+    const start = performance.now();
+    status.textContent = "Fique em silêncio por 2 segundos.";
+    task.timer = setInterval(() => {
+      const elapsed = performance.now() - start;
+      if (task.context.state !== "running" || document.hidden) { functionalCancelCalibration(); status.textContent = "Calibração interrompida. Tente novamente."; return; }
+      analyser.getFloatTimeDomainData(samples);
+      const rms = Math.sqrt(samples.reduce((sum, value) => sum + value ** 2, 0) / samples.length);
+      if (elapsed < 2000) task.quiet.push(rms);
+      else if (elapsed < 7000) { task.voice.push(rms); status.textContent = "Agora diga uma frase no seu volume habitual, com calma."; }
+      else {
+        const percentile = (values, fraction) => [...values].sort((a, b) => a - b)[Math.floor((values.length - 1) * fraction)] || 0;
+        const noiseFloor = Math.max(0.00005, percentile(task.quiet, 0.9));
+        const voiceLevel = percentile(task.voice, 0.75);
+        functionalCancelCalibration();
+        if (voiceLevel < noiseFloor * 1.7) { status.textContent = "A voz ficou muito próxima do ruído. Aproxime o microfone ou tente em um lugar mais silencioso."; return; }
+        const calibration = { at: new Date().toISOString(), noiseFloor, voiceLevel, threshold: Math.max(0.0006, noiseFloor * 1.6, noiseFloor + (voiceLevel - noiseFloor) * 0.2) };
+        try {
+          localStorage.setItem("vocalizing-mic-calibration-v1", JSON.stringify(calibration));
+          functionalListeningSettings.calibration = calibration;
+          functionalRenderListeningSettings();
+          functionalMessage("Calibração salva para este microfone. Você já pode iniciar a escuta.");
+        } catch { status.textContent = "Não foi possível salvar a calibração neste aparelho."; }
+      }
+    }, 70);
+  } catch (error) {
+    if (!task.cancelled) {
+      console.warn(`Calibração indisponível: ${error.name}: ${error.message}`);
+      functionalCancelCalibration();
+      status.textContent = "Não foi possível calibrar. Confira a permissão do microfone.";
+    }
+  }
+}
+
+function functionalComparablePrompt(exercise, prompt) {
+  return exercise.id !== "transferencia" && !/^(Escolha|Diga a palavra|Use ")/.test(prompt);
 }
 
 function functionalSaveReview() {
@@ -574,25 +700,25 @@ function functionalSaveListener() {
     return;
   }
   const attempt = functionalAttempts[index];
-  const candidate = functionalLastSignature?.at === attempt.at ? functionalLastSignature : null;
+  const candidate = functionalLastSignature?.id === attempt.id ? functionalLastSignature : null;
   const signature = candidate?.signature || attempt.listenerSignature;
   const consent = document.getElementById("functional-consent-features").checked && !!signature;
   const updated = functionalAttempts.map((item, itemIndex) => {
     if (itemIndex !== index) return item;
     const { listenerSignature, ...rest } = item;
-    return { ...rest, listenerResult: result, listenerAt: new Date().toISOString(), ...(consent ? { listenerSignature: signature } : {}) };
+    return { ...rest, listenerResult: result, listenerAt: new Date().toISOString(), ...(consent ? { listenerSignature: signature } : {}), ...(result === "all" && consent ? { score: null } : {}) };
   });
   if (!functionalPersist(FUNCTIONAL_STORAGE, updated)) return;
   functionalAttempts = updated;
   const key = functionalReferenceKey(attempt.exercise, attempt.prompt);
   let referenceSaved = false;
-  if (result === "all" && consent) {
-    const references = { ...functionalReferences, [key]: { ...signature, basedOn: attempt.at } };
+  if (result === "all" && consent && signature.quality?.usable !== false && signature.frames?.length >= 4 && functionalComparablePrompt(FUNCTIONAL_EXERCISES[functionalIndex], attempt.prompt)) {
+    const references = { ...functionalReferences, [key]: { ...signature, id: window.vocalizandoHistory.newId(), captureProfile: window.vocalizandoHistory.deviceId, basedOn: attempt.at, basedOnId: attempt.id } };
     if (functionalPersist(FUNCTIONAL_REFERENCES_STORAGE, references)) {
       functionalReferences = references;
       referenceSaved = true;
     }
-  } else if (functionalReferences[key]?.basedOn === attempt.at) {
+  } else if (functionalIsReference(functionalReferences[key], attempt)) {
     const references = { ...functionalReferences };
     delete references[key];
     if (functionalPersist(FUNCTIONAL_REFERENCES_STORAGE, references)) functionalReferences = references;
@@ -611,9 +737,9 @@ function functionalUndoAttempt() {
   const updated = functionalAttempts.filter((_, itemIndex) => itemIndex !== index);
   if (!functionalPersist(FUNCTIONAL_STORAGE, updated)) return;
   functionalAttempts = updated;
-  if (functionalLastSignature?.at === attempt.at) functionalLastSignature = null;
+  if (functionalLastSignature?.id === attempt.id) functionalLastSignature = null;
   const key = functionalReferenceKey(attempt.exercise, attempt.prompt);
-  if (functionalReferences[key]?.basedOn === attempt.at) {
+  if (functionalIsReference(functionalReferences[key], attempt)) {
     const references = { ...functionalReferences };
     delete references[key];
     if (functionalPersist(FUNCTIONAL_REFERENCES_STORAGE, references)) functionalReferences = references;
@@ -645,23 +771,45 @@ function functionalNextPrompt() {
   functionalMessage("Próxima frase selecionada.");
 }
 
+function functionalIsReference(reference, attempt) {
+  return !!reference && !!attempt && (reference.basedOnId ? reference.basedOnId === attempt.id : reference.basedOn === attempt.at);
+}
+
 function functionalRenderScore() {
   const index = functionalLastAttemptIndex();
   const attempt = index >= 0 ? functionalAttempts[index] : null;
   const reference = attempt && functionalReferences[functionalReferenceKey(attempt.exercise, attempt.prompt)];
-  const canSetReference = attempt?.source === "auto" && attempt.listenerResult !== "none" && attempt.listenerResult !== "part" && functionalLastSignature?.at === attempt.at && functionalLastSignature?.exercise === attempt.exercise && functionalPrompts(FUNCTIONAL_EXERCISES[functionalIndex]).includes(attempt.prompt);
+  const exercise = FUNCTIONAL_EXERCISES[functionalIndex];
+  const canSetReference = attempt?.source === "auto" && functionalComparablePrompt(exercise, attempt.prompt) && functionalLastSignature?.signature?.quality?.usable !== false && functionalLastSignature?.signature?.frames?.length >= 4 && attempt.listenerResult !== "none" && attempt.listenerResult !== "part" && functionalLastSignature?.id === attempt.id && functionalLastSignature?.exercise === attempt.exercise && functionalPrompts(exercise).includes(attempt.prompt);
   document.getElementById("functional-set-reference").disabled = !canSetReference;
   const value = document.getElementById("functional-score");
   const detail = document.getElementById("functional-score-detail");
-  value.textContent = Number.isFinite(attempt?.score) && reference && reference.basedOn !== attempt.at ? `${attempt.score}/100` : "—";
+  value.textContent = Number.isFinite(attempt?.score) && reference && !functionalIsReference(reference, attempt) ? `${attempt.score}/100` : "—";
   if (!attempt) detail.textContent = "Grave uma tentativa e escolha uma referência para esta frase.";
-  else if (reference?.basedOn === attempt.at) detail.textContent = "Esta tentativa é sua referência. A próxima receberá nota.";
+  else if (functionalIsReference(reference, attempt)) detail.textContent = "Esta tentativa é sua referência. A próxima receberá nota.";
   else if (Number.isFinite(attempt.score) && reference) detail.textContent = attempt.listenerResult === "none" || attempt.listenerResult === "part" ? "O ouvinte não entendeu a frase toda. A nota acústica não mede compreensão." : "Semelhança com sua referência pessoal da mesma frase; não é nota de compreensão.";
   else if (attempt.source === "manual") detail.textContent = "Correções manuais de contagem não recebem nota de áudio.";
   else if (["none", "part"].includes(attempt.listenerResult)) detail.textContent = "O ouvinte não entendeu a frase toda. Isso fica registrado sem nota automática de compreensão.";
+  else if (!functionalComparablePrompt(exercise, attempt.prompt)) detail.textContent = "Esta proposta tem resposta livre. Duração e pausas ficam registradas, sem nota de semelhança.";
+  else if (attempt.quality?.usable === false) detail.textContent = "Tentativa salva sem nota: o áudio teve pouco contraste com o ruído ou volume saturado.";
   else if (reference) detail.textContent = "Esta tentativa não teve áudio suficiente para comparação.";
   else if (canSetReference) detail.textContent = "Escolha esta tentativa como referência para esta frase.";
   else detail.textContent = "Sem áudio suficiente para referência. Faça outra tentativa.";
+  const measures = document.getElementById("functional-attempt-measures");
+  measures.replaceChildren();
+  for (const [label, milliseconds] of [["Duração", attempt?.durationMs], ["Som detectado", attempt?.voicedMs], ["Pausas internas", attempt?.pauseMs]]) {
+    if (!Number.isFinite(milliseconds)) continue;
+    const cell = document.createElement("div");
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const data = document.createElement("dd");
+    data.textContent = `${(milliseconds / 1000).toFixed(1).replace(".", ",")} s`;
+    cell.append(term, data);
+    measures.append(cell);
+  }
+  const comparison = document.getElementById("functional-comparison");
+  const previous = attempt && [...functionalAttempts.slice(0, index)].reverse().find(item => item.exercise === attempt.exercise && item.prompt === attempt.prompt && item.captureProfile === attempt.captureProfile && item.referenceId && item.referenceId === attempt.referenceId && Number.isFinite(item.score) && Number.isFinite(attempt.score));
+  comparison.textContent = previous ? `Mesma frase e referência: ${attempt.score - previous.score > 0 ? "+" : ""}${attempt.score - previous.score} pontos de semelhança desde a tentativa anterior. ${attempt.listenerResult ? `Ouvinte: ${{ all: "entendeu tudo", part: "entendeu parte", none: "não entendeu" }[attempt.listenerResult]}.` : "Sem retorno de ouvinte nesta tentativa."}` : "";
 }
 
 function functionalSetReference() {
@@ -669,9 +817,9 @@ function functionalSetReference() {
   if (index < 0) return;
   const attempt = functionalAttempts[index];
   const candidate = functionalLastSignature;
-  if (!candidate || candidate.at !== attempt.at || candidate.exercise !== attempt.exercise || candidate.prompt !== attempt.prompt || ["none", "part"].includes(attempt.listenerResult)) return;
+  if (!candidate || candidate.signature?.quality?.usable === false || candidate.signature?.frames?.length < 4 || !functionalComparablePrompt(FUNCTIONAL_EXERCISES[functionalIndex], attempt.prompt) || candidate.id !== attempt.id || candidate.exercise !== attempt.exercise || candidate.prompt !== attempt.prompt || ["none", "part"].includes(attempt.listenerResult)) return;
   const key = functionalReferenceKey(attempt.exercise, attempt.prompt);
-  const updated = { ...functionalReferences, [key]: { ...candidate.signature, basedOn: attempt.at } };
+  const updated = { ...functionalReferences, [key]: { ...candidate.signature, id: window.vocalizandoHistory.newId(), captureProfile: window.vocalizandoHistory.deviceId, basedOn: attempt.at, basedOnId: attempt.id } };
   if (!functionalPersist(FUNCTIONAL_REFERENCES_STORAGE, updated)) return;
   functionalReferences = updated;
   if (attempt.score != null) {
@@ -696,7 +844,7 @@ function functionalRenderHistory() {
   document.getElementById("functional-undo-attempt").disabled = !hasCurrentAttempt;
   document.getElementById("functional-save-listener").disabled = !hasCurrentAttempt;
   const latest = hasCurrentAttempt ? functionalAttempts[functionalLastAttemptIndex()] : null;
-  document.getElementById("functional-consent-features").disabled = !latest || (functionalLastSignature?.at !== latest.at && !latest.listenerSignature);
+  document.getElementById("functional-consent-features").disabled = !latest || (functionalLastSignature?.id !== latest.id && !latest.listenerSignature);
   functionalRenderScore();
   const history = document.getElementById("functional-history");
   history.replaceChildren();
@@ -715,8 +863,9 @@ function functionalRenderHistory() {
     if (item.prompt) details.push(item.prompt);
     if (item.source === "auto") details.push("som detectado");
     if (item.source === "manual") details.push("contagem corrigida");
+    if (item.source === "recording") details.push("gravação salva");
     if (item.voicedMs != null) details.push(`${(item.voicedMs / 1000).toFixed(1).replace(".", ",")} s de som`);
-    if (Number.isFinite(item.score) && functionalReferences[functionalReferenceKey(item.exercise, item.prompt)]?.basedOn !== item.at) details.push(`semelhança ${item.score}/100`);
+    if (Number.isFinite(item.score) && !functionalIsReference(functionalReferences[functionalReferenceKey(item.exercise, item.prompt)], item)) details.push(`semelhança ${item.score}/100`);
     if (item.clarity != null) details.push(`clareza ${item.clarity}/10`);
     if (item.effort != null) details.push(`esforço ${item.effort}/10`);
     if (item.listenerResult) details.push(`ouvinte: ${{ all: "entendeu tudo", part: "entendeu parte", none: "não entendeu" }[item.listenerResult] || item.listenerResult}`);
@@ -789,9 +938,7 @@ function functionalRenderBaselines() {
   }
 }
 
-function functionalInit() {
-  const selector = document.getElementById("functional-exercise");
-  if (!selector) return;
+function functionalReloadData() {
   functionalAttempts = functionalRead(FUNCTIONAL_STORAGE, []);
   functionalBaselines = functionalRead(FUNCTIONAL_BASELINE_STORAGE, []);
   functionalTargets = functionalRead(FUNCTIONAL_TARGETS_STORAGE, { words: [], phrases: [] });
@@ -801,9 +948,31 @@ function functionalInit() {
   if (!Array.isArray(functionalTargets.words)) functionalTargets.words = [];
   if (!Array.isArray(functionalTargets.phrases)) functionalTargets.phrases = functionalTargets.phrase ? [functionalTargets.phrase] : [];
   if (!functionalReferences || typeof functionalReferences !== "object" || Array.isArray(functionalReferences)) functionalReferences = {};
-  for (const exercise of FUNCTIONAL_EXERCISES) selector.add(new Option(exercise.name, exercise.id));
+  const settings = functionalRead("vocalizing-listening-v1", {});
+  functionalListeningSettings = {
+    sensitivity: Math.max(60, Math.min(160, Number(settings.sensitivity) || 100)),
+    pause: Math.max(1, Math.min(5, Number(settings.pause) || 2.5)),
+    calibration: functionalRead("vocalizing-mic-calibration-v1", null)
+  };
   document.getElementById("functional-words").value = functionalTargets.words.join("\n");
   document.getElementById("functional-phrase").value = functionalTargets.phrases.join("\n");
+  functionalRenderListeningSettings();
+  functionalRenderExercise();
+  functionalRenderHistory();
+  functionalRenderBaselines();
+}
+
+function functionalInit() {
+  const selector = document.getElementById("functional-exercise");
+  if (!selector) return;
+  for (const exercise of FUNCTIONAL_EXERCISES) selector.add(new Option(exercise.name, exercise.id));
+  functionalReloadData();
+  document.getElementById("functional-calibrate").addEventListener("click", functionalCalibrate);
+  for (const field of ["sensitivity", "pause"]) document.getElementById(`functional-${field}`).addEventListener("input", event => {
+    functionalListeningSettings[field] = Number(event.target.value);
+    functionalPersist("vocalizing-listening-v1", { sensitivity: functionalListeningSettings.sensitivity, pause: functionalListeningSettings.pause });
+    functionalRenderListeningSettings();
+  });
   selector.addEventListener("change", () => functionalSelect(FUNCTIONAL_EXERCISES.findIndex(exercise => exercise.id === selector.value)));
   document.getElementById("functional-duration").addEventListener("change", functionalResetTimer);
   document.getElementById("functional-prev").addEventListener("click", () => functionalSelect(functionalIndex - 1));
@@ -860,10 +1029,12 @@ function functionalInit() {
     });
   }
   window.addEventListener("pagehide", () => {
+    functionalCancelCalibration();
+    functionalPauseTimer();
     functionalStopRecording("background");
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && functionalListening) functionalStopRecording("background");
+    if (document.hidden) { functionalCancelCalibration(); functionalPauseTimer(); if (functionalListening || functionalStarting) functionalStopRecording("background"); }
   });
   functionalResetTimer();
   functionalRenderExercise();
@@ -874,3 +1045,4 @@ function functionalInit() {
 
 window.addEventListener("DOMContentLoaded", functionalInit);
 window.addEventListener("vocalizando-recordings-updated", functionalRenderSavedAudio);
+window.addEventListener("vocalizando-history-updated", functionalReloadData);

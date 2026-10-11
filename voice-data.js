@@ -38,9 +38,22 @@
     get: key => request("kv", "get", key),
     put: (key, value) => request("kv", "put", value, key),
     remove: key => request("kv", "delete", key),
-    recordings: () => request("recordings", "getAll"),
+    recordings: async () => (await request("recordings", "getAll")).map(item => {
+      if (item.blob) return item;
+      const { audioBytes, audioType, ...recording } = item;
+      return { ...recording, blob: new Blob([audioBytes], { type: audioType || "audio/webm" }) };
+    }),
     saveRecording: async value => {
-      await request("recordings", "put", value);
+      // ArrayBuffer also works in WebKit contexts that cannot persist Blob values.
+      const audioBytes = await value.blob.arrayBuffer();
+      const encoded = () => {
+        const { blob, ...recording } = value;
+        return { ...recording, audioBytes, audioType: blob.type };
+      };
+      await request("recordings", "put", encoded());
+      window.vocalizandoHistory.addRecordingAttempt(value);
+      window.vocalizandoHistory.recordingReview(value);
+      await request("recordings", "put", encoded());
       window.dispatchEvent(new Event("vocalizando-recordings-updated"));
     },
     deleteRecording: async id => {

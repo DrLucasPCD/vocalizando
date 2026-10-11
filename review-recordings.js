@@ -6,11 +6,16 @@
   let stream = null;
   let timeout = null;
   let urls = [];
+  let startToken = 0;
+  let saving = Promise.resolve();
 
   function message(value) { status.textContent = value; }
   function stop() {
+    startToken++;
     clearTimeout(timeout);
     if (recorder?.state === "recording") recorder.stop();
+    stream?.getTracks().forEach(track => track.stop());
+    return saving;
   }
 
   async function render() {
@@ -70,32 +75,42 @@
     if (typeof tongueState !== "undefined" && tongueState.listening) stopPronunciation();
     if (typeof modelListening !== "undefined" && modelListening) stopRecognition();
     if (typeof functionalListening !== "undefined" && functionalListening) functionalStopRecording();
+    if (typeof functionalCancelCalibration === "function") functionalCancelCalibration();
     window.vocalizandoVoice?.stop();
     button.disabled = true;
+    const token = ++startToken;
     message("Abrindo microfone...");
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (token !== startToken || document.hidden) { recordingStream.getTracks().forEach(track => track.stop()); return; }
+      stream = recordingStream;
       const mime = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find(type => MediaRecorder.isTypeSupported(type));
       recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const activeRecorder = recorder;
+      let finishSaving;
+      saving = new Promise(resolve => { finishSaving = resolve; });
+      recordingStream.getAudioTracks()[0]?.addEventListener("ended", () => { if (activeRecorder.state === "recording") stop(); });
       const parts = [];
       const prompt = currentTwister().text;
       recorder.ondataavailable = event => { if (event.data.size) parts.push(event.data); };
       recorder.onstop = async () => {
         clearTimeout(timeout);
-        stream?.getTracks().forEach(track => track.stop());
-        stream = null;
+        recordingStream.getTracks().forEach(track => track.stop());
+        if (stream === recordingStream) stream = null;
         button.textContent = "Gravar para revisão";
-        recorder = null;
-        if (!parts.length) { message("Nenhum áudio foi capturado. Tente novamente."); return; }
+        if (recorder === activeRecorder) recorder = null;
+        if (!parts.length) { message("Nenhum áudio foi capturado. Tente novamente."); finishSaving(); return; }
         try {
           const blob = new Blob(parts, { type: parts[0].type || mime || "audio/webm" });
+          message("Salvando gravação e tentativa...");
           await window.vocalizandoData.saveRecording({
             id: `twister-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             kind: "twister", at: new Date().toISOString(), updatedAt: new Date().toISOString(), prompt, blob
           });
-          message("Gravação guardada. Use Sincronizar agora para enviá-la à sua conta.");
+          message("Gravação e tentativa salvas. Sincronize para recebê-las no outro aparelho.");
           await render();
         } catch (error) { message(`Não foi possível guardar o áudio: ${error.message}.`); }
+        finally { finishSaving(); }
       };
       recorder.onerror = () => { stop(); message("A gravação foi interrompida."); };
       recorder.start();
@@ -110,5 +125,6 @@
 
   button.addEventListener("click", start);
   window.addEventListener("vocalizando-recordings-updated", render);
+  window.vocalizandoReview = { stop };
   render();
 })();
