@@ -206,9 +206,9 @@
         <div class="personal-data-actions"><button id="personal-export" type="button" disabled>Exportar exemplos</button><button id="personal-import" type="button">Importar exemplos</button><input id="personal-import-file" type="file" accept=".bin,application/octet-stream" hidden><button id="personal-delete" type="button" disabled>Apagar treino</button></div>
         <div class="cloud-sync" aria-labelledby="cloud-title">
           <div class="personal-heading"><h4 id="cloud-title">Sincronizar entre aparelhos</h4><strong id="cloud-account">Desconectado</strong></div>
-          <p>Histórico, notas, referências, frases pessoais e gravações podem ser guardados na sua conta Firebase.</p>
-          <label class="personal-consent"><input id="cloud-consent" type="checkbox"> Autorizo sincronizar meu histórico, características da voz e gravações com minha conta Firebase.</label>
-          <div class="personal-data-actions"><button id="cloud-login" type="button">Entrar com Google</button><button id="cloud-logout" type="button" hidden>Sair</button><button id="cloud-sync" type="button" disabled>Sincronizar agora</button><button id="cloud-delete" type="button" disabled>Apagar da nuvem</button></div>
+          <p>Histórico, notas, referências, frases pessoais e gravações ficam privados na sua conta Supabase.</p>
+          <label class="personal-consent"><input id="cloud-consent" type="checkbox"> Autorizo sincronizar meu histórico, características da voz e gravações com minha conta Supabase.</label>
+          <div class="personal-data-actions"><button id="cloud-login" type="button" disabled>Entrar com Google</button><button id="cloud-logout" type="button" hidden>Sair</button><button id="cloud-sync" type="button" disabled>Sincronizar agora</button><button id="cloud-delete" type="button" disabled>Apagar da nuvem</button></div>
           <div id="cloud-conflict" class="personal-data-actions" hidden><button id="cloud-use-local" type="button">Usar deste aparelho</button><button id="cloud-use-remote" type="button">Usar da nuvem</button></div>
           <p id="cloud-status" class="personal-status" role="status">Nenhuma gravação é enviada automaticamente.</p>
         </div>
@@ -452,7 +452,7 @@
       </article>
 
       <section class="data-panel" aria-label="Seus dados">
-        <div><span class="card-label">Dados no dispositivo</span><h3>Backup do histórico</h3><p>O backup JSON pode incluir características da voz; guarde-o com cuidado. Áudios não entram nele: exporte os exemplos à parte ou sincronize as gravações pelo Firebase. Apagar dados deste aparelho não apaga a cópia na nuvem.</p><p id="data-status" role="status"></p></div>
+        <div><span class="card-label">Dados no dispositivo</span><h3>Backup do histórico</h3><p>O backup JSON pode incluir características da voz; guarde-o com cuidado. Áudios não entram nele: exporte os exemplos à parte ou sincronize as gravações pelo Supabase. Apagar dados deste aparelho não apaga a cópia na nuvem.</p><p id="data-status" role="status"></p></div>
         <div class="data-actions"><button id="export-data" type="button">Exportar dados</button><button id="import-data" type="button">Importar backup</button><input id="import-file" type="file" accept="application/json,.json" hidden><button id="delete-data" type="button" class="danger-action">Apagar meus dados</button></div>
       </section>
     </section>
@@ -533,7 +533,7 @@
   <script src="voice-playback.js?v=20260928-1"></script>
   <script src="script.js?v=20261011-1"></script>
   <script src="personal-training.js?v=20260927-3"></script>
-  <script type="module" src="firebase-cloud.js?v=20261011-1"></script>
+  <script type="module" src="cloud-sync.js?v=20261011-2"></script>
   <script src="functional-training.js?v=20261011-1"></script>
   <script src="review-recordings.js?v=20261011-1"></script>
 </body>

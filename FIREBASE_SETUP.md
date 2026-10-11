@@ -1,5 +1,7 @@
 # Sincronização Firebase
 
+> Guia legado. A integração atual usa Supabase; veja `SUPABASE_SETUP.md`. Estes arquivos de regras são mantidos como referência para o projeto antigo. A troca não exclui nenhum dado do Firebase.
+
 O site usa o projeto `vocalizando-b98c7`. Nenhum áudio é enviado antes de entrar com Google, marcar a autorização e tocar em **Sincronizar agora**. O modelo treinado fica neste aparelho; os exemplos são sincronizados para que você possa treiná-lo no outro.
 
 ## Ativar uma vez no console

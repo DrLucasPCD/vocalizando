@@ -1,18 +1,7 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
-import { getStorage, ref, getBytes, getMetadata, uploadBytes, deleteObject, listAll } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-storage.js";
+import { createSupabaseCloud } from "./supabase-cloud.js?v=20261011-2";
+import { supabaseConfig } from "./supabase-config.js?v=20261011-2";
 
-const app = initializeApp({
-  apiKey: "AIzaSyD4HNbec_TNkd5TpJsAdwDK66ecXCCh1MY",
-  authDomain: "vocalizando-b98c7.firebaseapp.com",
-  databaseURL: "https://vocalizando-b98c7-default-rtdb.firebaseio.com",
-  projectId: "vocalizando-b98c7",
-  storageBucket: "vocalizando-b98c7.firebasestorage.app",
-  messagingSenderId: "303005437694",
-  appId: "1:303005437694:web:63616bb276f39c9c8c9faf"
-});
-const auth = getAuth(app);
-const storage = getStorage(app);
+let cloud = null;
 const element = id => document.getElementById(id);
 const status = message => { element("cloud-status").textContent = message; };
 let user = null;
@@ -24,9 +13,12 @@ function checkAccount() {
   if (!user || user.uid !== syncUid) throw new Error("A conta mudou durante a sincronização. Entre novamente e tente de novo.");
 }
 function claimLocalData() {
-  const owner = localStorage.getItem("vocalizing-cloud-owner-v2");
+  const owner = localStorage.getItem(cloud.ownerKey);
   if (owner && owner !== user.uid) throw new Error("Os dados deste navegador pertencem a outra conta. Exporte e apague os dados locais antes de sincronizar com esta conta.");
-  localStorage.setItem("vocalizing-cloud-owner-v2", user.uid);
+  if (!owner && localStorage.getItem("vocalizing-cloud-owner-v2") && !window.confirm("Este aparelho já foi sincronizado com o Firebase. Confirma que esta conta Supabase também é sua e que deseja transferir os dados locais para ela?")) {
+    throw new Error("Transferência cancelada. Seus dados locais foram mantidos.");
+  }
+  localStorage.setItem(cloud.ownerKey, user.uid);
 }
 
 function render() {
@@ -35,26 +27,26 @@ function render() {
   element("cloud-logout").hidden = !user;
   element("cloud-sync").disabled = !user || busy;
   element("cloud-delete").disabled = !user || busy;
-  element("cloud-login").disabled = busy;
+  element("cloud-login").disabled = !cloud || busy;
   element("cloud-logout").disabled = busy;
   element("cloud-conflict").hidden = !conflict;
 }
 
 function cloudRef() {
   if (!user) throw new Error("Entre na sua conta antes de sincronizar.");
-  return ref(storage, `users/${accountUid()}/calibration/examples.bin`);
+  return cloud.file(`users/${accountUid()}/calibration/examples.bin`);
 }
 
-function recordingRef(id) { return ref(storage, `users/${accountUid()}/recordings/${id}`); }
-function deletionRef(id) { return ref(storage, `users/${accountUid()}/deleted/${id}`); }
+function recordingRef(id) { return cloud.file(`users/${accountUid()}/recordings/${id}`); }
+function deletionRef(id) { return cloud.file(`users/${accountUid()}/deleted/${id}`); }
 
 async function downloadHistory() {
-  const folder = ref(storage, `users/${accountUid()}/history`);
-  const remote = await listAll(folder);
+  const folder = cloud.file(`users/${accountUid()}/history`);
+  const remote = await cloud.listAll(folder);
   const snapshots = [];
   for (const file of remote.items) {
     checkAccount();
-    const buffer = await getBytes(file, 10 * 1024 * 1024);
+    const buffer = await cloud.getBytes(file, 10 * 1024 * 1024);
     snapshots.push(JSON.parse(new TextDecoder().decode(buffer)));
   }
   checkAccount();
@@ -65,7 +57,7 @@ async function uploadHistory() {
   const snapshot = window.vocalizandoHistory.snapshot();
   const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
   if (bytes.length >= 10 * 1024 * 1024) throw new Error("O histórico ultrapassa 10 MB. Exporte um backup antes de continuar.");
-  await uploadBytes(ref(storage, `users/${accountUid()}/history/${window.vocalizandoHistory.deviceId}.json`), bytes, { contentType: "application/json" });
+  await cloud.uploadBytes(cloud.file(`users/${accountUid()}/history/${window.vocalizandoHistory.deviceId}.json`), bytes, { contentType: "application/json" });
   checkAccount();
   return `${window.vocalizandoHistory.active().filter(item => item.kind !== "baseline").length} tentativas no histórico sincronizado`;
 }
@@ -74,17 +66,17 @@ async function syncRecordings() {
   const local = await window.vocalizandoData.recordings();
   const localDeleted = await window.vocalizandoData.deletedRecordings();
   const [remoteList, deletedList] = await Promise.all([
-    listAll(ref(storage, `users/${accountUid()}/recordings`)),
-    listAll(ref(storage, `users/${accountUid()}/deleted`))
+    cloud.listAll(cloud.file(`users/${accountUid()}/recordings`)),
+    cloud.listAll(cloud.file(`users/${accountUid()}/deleted`))
   ]);
   const deleted = new Set([...localDeleted, ...deletedList.items.map(item => item.name)]);
   const remoteDeletes = new Set(deletedList.items.map(item => item.name));
   const remote = new Map(remoteList.items.map(item => [item.name, item]));
   for (const id of deleted) {
     checkAccount();
-    if (!remoteDeletes.has(id)) await uploadBytes(deletionRef(id), new Uint8Array(0), { contentType: "application/octet-stream" });
+    if (!remoteDeletes.has(id)) await cloud.uploadBytes(deletionRef(id), new Uint8Array(0), { contentType: "application/octet-stream" });
     if (remote.has(id)) {
-      await deleteObject(remote.get(id));
+      await cloud.deleteObject(remote.get(id));
       remote.delete(id);
     }
     if (local.some(item => item.id === id) && !localDeleted.includes(id)) await window.vocalizandoData.deleteRecording(id);
@@ -97,12 +89,12 @@ async function syncRecordings() {
     const remoteItem = remote.get(item.id);
     let shouldUpload = !remoteItem;
     if (remoteItem) {
-      const metadata = await getMetadata(remoteItem);
+      const metadata = await cloud.getMetadata(remoteItem);
       shouldUpload = new Date(item.updatedAt || item.at) > new Date(metadata.customMetadata?.updatedAt || metadata.updated);
     }
     if (!shouldUpload) continue;
     if (item.blob.size >= 10 * 1024 * 1024) throw new Error("Uma gravação ultrapassa o limite de 10 MB.");
-    await uploadBytes(recordingRef(item.id), item.blob, {
+    await cloud.uploadBytes(recordingRef(item.id), item.blob, {
       contentType: item.blob.type || "audio/webm",
       customMetadata: {
         kind: item.kind, at: item.at, updatedAt: item.updatedAt || item.at,
@@ -116,12 +108,12 @@ async function syncRecordings() {
   for (const [id, remoteItem] of remote) {
     checkAccount();
     if (deleted.has(id)) continue;
-    const metadata = await getMetadata(remoteItem);
+    const metadata = await cloud.getMetadata(remoteItem);
     const localItem = localMap.get(id);
     if (localItem && new Date(localItem.updatedAt || localItem.at) >= new Date(metadata.customMetadata?.updatedAt || metadata.updated)) continue;
     const custom = metadata.customMetadata || {};
     if (!(["functional", "twister"].includes(custom.kind))) continue;
-    const bytes = await getBytes(remoteItem, 10 * 1024 * 1024);
+    const bytes = await cloud.getBytes(remoteItem, 10 * 1024 * 1024);
     checkAccount();
     let attemptIds = [];
     try { attemptIds = JSON.parse(custom.attemptIds || "[]"); } catch {}
@@ -146,7 +138,7 @@ async function sha256(buffer) {
 }
 
 async function remoteMetadata() {
-  try { return await getMetadata(cloudRef()); }
+  try { return await cloud.getMetadata(cloudRef()); }
   catch (error) {
     if (error.code === "storage/object-not-found") return null;
     throw error;
@@ -154,19 +146,22 @@ async function remoteMetadata() {
 }
 
 async function upload(buffer, hash) {
-  await uploadBytes(cloudRef(), new Uint8Array(buffer), {
+  checkAccount();
+  if (buffer.byteLength > 40 * 1024 * 1024) throw new Error("Os exemplos ultrapassam o limite de 40 MB.");
+  await cloud.uploadBytes(cloudRef(), new Uint8Array(buffer), {
     contentType: "application/octet-stream",
     customMetadata: { sha256: hash, schema: "1" }
   });
-  localStorage.setItem(`vocalizing-cloud-hash-${user.uid}`, hash);
+  checkAccount();
+  localStorage.setItem(`${cloud.ownerKey}-hash-${user.uid}`, hash);
   status("Exemplos de voz enviados para sua conta. No outro aparelho, entre com a mesma conta e toque em Sincronizar agora.");
 }
 
 async function download() {
-  const buffer = await getBytes(cloudRef(), 40 * 1024 * 1024);
+  const buffer = await cloud.getBytes(cloudRef(), 40 * 1024 * 1024);
   checkAccount();
   await window.vocalizandoPersonal.replaceExamples(buffer);
-  localStorage.setItem(`vocalizing-cloud-hash-${user.uid}`, await sha256(buffer));
+  localStorage.setItem(`${cloud.ownerKey}-hash-${user.uid}`, await sha256(buffer));
   status("Exemplos recebidos. Toque em Treinar modelo neste aparelho para ativá-lo.");
 }
 
@@ -194,7 +189,7 @@ async function sync() {
     checkAccount();
     const localHash = local ? await sha256(local) : null;
     const remoteHash = remote?.customMetadata?.sha256 || null;
-    const lastHash = localStorage.getItem(`vocalizing-cloud-hash-${user.uid}`);
+    const lastHash = localStorage.getItem(`${cloud.ownerKey}-hash-${user.uid}`);
     if (!remote && local) await upload(local, localHash);
     else if (!remote) status("Ainda não há exemplos de voz para sincronizar.");
     else if (remoteHash && remoteHash === localHash) status("Os exemplos já estão iguais nos dois aparelhos.");
@@ -205,19 +200,21 @@ async function sync() {
       status("Os dois aparelhos têm exemplos diferentes. Escolha qual versão manter.");
     }
     const recordingSummary = await syncRecordings();
-    let historySummary = "Histórico ainda não sincronizado: publique as regras atualizadas do Storage (caminho history)";
+    let historySummary = "Histórico ainda não sincronizado: configure as políticas privadas do Supabase";
     try { if (!historyError) historySummary = await uploadHistory(); }
     catch (error) {
       if (error.code !== "storage/unauthorized") throw error;
-      historySummary = "Histórico ainda não sincronizado: publique as regras atualizadas do Storage (caminho history)";
+      historySummary = "Histórico ainda não sincronizado: configure as políticas privadas do Supabase";
     }
     status(`${element("cloud-status").textContent} ${recordingSummary}. ${historySummary}.`);
   } catch (error) {
     console.warn("Falha na sincronização", error);
-    status(error.code === "storage/unauthorized"
-      ? "Acesso negado. Confira as regras do Storage para esta conta."
+    status(error.code === "storage/not-configured"
+      ? "O bucket privado do Supabase ainda não foi criado. Configure o projeto antes de sincronizar."
+      : error.code === "storage/unauthorized"
+      ? "Acesso negado. Confira o bucket privado e as políticas do Supabase para esta conta."
       : error.code === "storage/unknown"
-        ? "Falha de rede ou CORS. Confira a configuração do bucket e tente novamente."
+        ? "Falha de rede. Confira sua conexão e tente novamente."
         : `Não foi possível sincronizar: ${error.message || "falha de rede"}.`);
   } finally {
     busy = false;
@@ -246,17 +243,34 @@ async function resolveConflict(useLocal) {
 }
 
 element("cloud-login").addEventListener("click", async () => {
+  if (!cloud || busy) return;
+  busy = true;
+  render();
   try {
-    await signInWithPopup(auth, new GoogleAuthProvider());
-    status("Conectado. Autorize e sincronize seu histórico e suas gravações.");
+    await window.vocalizandoLifecycle?.pause("login");
+    await cloud.signIn();
+    status("Abrindo o login com Google...");
   } catch (error) {
-    status(error.code === "auth/unauthorized-domain" ? "Adicione o domínio deste site aos domínios autorizados do Firebase Authentication." : `Não foi possível entrar: ${error.message}.`);
+    status(`Não foi possível entrar: ${error.message}. Confira o provedor Google e as URLs autorizadas no Supabase.`);
+  } finally {
+    busy = false;
+    render();
   }
 });
 element("cloud-logout").addEventListener("click", async () => {
-  await signOut(auth);
-  conflict = null;
-  status("Desconectado. Seus exemplos locais continuam neste aparelho.");
+  if (!cloud || busy) return;
+  busy = true;
+  render();
+  try {
+    await cloud.signOut();
+    conflict = null;
+    status("Desconectado. Seus exemplos locais continuam neste aparelho.");
+  } catch (error) {
+    status(`Não foi possível sair: ${error.message}.`);
+  } finally {
+    busy = false;
+    render();
+  }
 });
 element("cloud-sync").addEventListener("click", sync);
 element("cloud-delete").addEventListener("click", async () => {
@@ -266,14 +280,16 @@ element("cloud-delete").addEventListener("click", async () => {
   render();
   try {
     const files = await Promise.all([
-      listAll(ref(storage, `users/${accountUid()}/recordings`)),
-      listAll(ref(storage, `users/${accountUid()}/deleted`)),
-      listAll(ref(storage, `users/${accountUid()}/history`))
+      cloud.listAll(cloud.file(`users/${accountUid()}/recordings`)),
+      cloud.listAll(cloud.file(`users/${accountUid()}/deleted`)),
+      cloud.listAll(cloud.file(`users/${accountUid()}/history`))
     ]);
-    for (const file of files.flatMap(group => group.items)) { checkAccount(); await deleteObject(file); }
-    try { await deleteObject(cloudRef()); }
+    for (const file of files.flatMap(group => group.items)) { checkAccount(); await cloud.deleteObject(file); }
+    checkAccount();
+    try { await cloud.deleteObject(cloudRef()); }
     catch (error) { if (error.code !== "storage/object-not-found") throw error; }
-    localStorage.removeItem(`vocalizing-cloud-hash-${user.uid}`);
+    checkAccount();
+    localStorage.removeItem(`${cloud.ownerKey}-hash-${user.uid}`);
     status("Histórico e gravações apagados da nuvem. Os dados locais podem ser reenviados numa nova sincronização.");
   } catch (error) {
     status(error.code === "storage/object-not-found" ? "Não há exemplos na nuvem." : `Não foi possível apagar: ${error.message}.`);
@@ -285,9 +301,34 @@ element("cloud-delete").addEventListener("click", async () => {
 });
 element("cloud-use-local").addEventListener("click", () => resolveConflict(true));
 element("cloud-use-remote").addEventListener("click", () => resolveConflict(false));
-onAuthStateChanged(auth, current => {
-  user = current;
-  if (!user) conflict = null;
-  render();
-});
 render();
+async function initializeCloud() {
+  try {
+    cloud = await createSupabaseCloud(supabaseConfig);
+    if (!cloud) {
+      status("Sincronização indisponível: o projeto Supabase ainda não foi configurado. Seus dados continuam neste aparelho.");
+      return;
+    }
+    cloud.onAuthStateChanged(current => {
+      const changed = user?.uid !== current?.uid;
+      user = current;
+      if (changed) conflict = null;
+      if (!busy && changed) status(user ? "Conectado. Nenhum dado é enviado sem sua autorização." : "Desconectado. Seus dados locais foram mantidos.");
+      render();
+    });
+    if (cloud.googleAvailable) {
+      try {
+        const enabled = await cloud.googleAvailable();
+        if (!enabled && !user) status("Login Google ainda não configurado no Supabase. Seus dados continuam neste aparelho.");
+      } catch (error) {
+        if (!user) status(`${error.message} Seus dados continuam neste aparelho.`);
+      }
+    }
+  } catch (error) {
+    cloud = null;
+    status(`Sincronização indisponível: ${error.message}. Seus dados locais foram mantidos.`);
+  } finally {
+    render();
+  }
+}
+const cloudReady = initializeCloud();

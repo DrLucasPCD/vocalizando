@@ -28,7 +28,13 @@
 /review-recordings.js
   Cache-Control: no-store
 
-/firebase-cloud.js
+/cloud-sync.js
+  Cache-Control: no-store
+
+/supabase-cloud.js
+  Cache-Control: no-store
+
+/supabase-config.js
   Cache-Control: no-store
 
 /styles.css

@@ -135,8 +135,8 @@ test("storage exhaustion restores the previous attempt and snapshot", () => {
   assert.equal(current.history.active().length, 0);
 });
 
-const cloudSource = readFileSync(new URL("../firebase-cloud.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
-function connect(current, files, { denyHistory = false } = {}) {
+const cloudSource = readFileSync(new URL("../cloud-sync.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
+async function connect(current, files, { denyHistory = false, configured = true, recordings = new Map(), deletions = new Set() } = {}) {
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, { textContent: "", checked: true, addEventListener(name, callback) { this[name] = callback; } });
@@ -148,35 +148,48 @@ function connect(current, files, { denyHistory = false } = {}) {
   Object.assign(current.context, {
     console: { ...console, warn() {} }, TextEncoder, TextDecoder, Blob, Uint8Array,
     document: { getElementById: element },
-    initializeApp() {}, getAuth() {}, getStorage() {}, GoogleAuthProvider: class {},
-    onAuthStateChanged(auth, callback) { authChanged = callback; callback({ uid: "test-account", email: "test@example.com" }); },
-    signInWithPopup: async () => { throw Object.assign(new Error("Domain"), { code: "auth/unauthorized-domain" }); },
+    supabaseConfig: {},
+    createSupabaseCloud: async () => configured ? ({
+    ownerKey: "vocalizing-supabase-owner-test",
+    onAuthStateChanged(callback) { authChanged = callback; callback({ uid: "test-account", email: "test@example.com" }); },
+    signIn: async () => { throw new Error("Google desativado"); },
     signOut: async () => authChanged(null),
-    ref(storage, path) { return reference(path); },
+    file: reference,
     listAll: async folder => {
       if (denyHistory && folder.fullPath.endsWith("/history")) throw Object.assign(new Error("Denied"), { code: "storage/unauthorized" });
       return { items: [...files.keys()].filter(path => path.startsWith(`${folder.fullPath}/`) && !path.slice(folder.fullPath.length + 1).includes("/")).map(reference) };
     },
     getMetadata: async file => { if (!files.has(file.fullPath)) throw notFound(); return files.get(file.fullPath).metadata; },
-    getBytes: async file => { if (!files.has(file.fullPath)) throw notFound(); return files.get(file.fullPath).bytes; },
+    getBytes: async file => { if (!files.has(file.fullPath)) throw notFound(); const bytes = files.get(file.fullPath).bytes; return bytes instanceof Blob ? bytes.arrayBuffer() : bytes; },
     uploadBytes: async (file, bytes, metadata) => { files.set(file.fullPath, { bytes, metadata: { ...metadata, updated: new Date().toISOString() } }); },
     deleteObject: async file => { if (!files.delete(file.fullPath)) throw notFound(); }
+    }) : null
   });
   current.window.vocalizandoPersonal = { examplesBuffer: async () => null };
-  current.window.vocalizandoData = { recordings: async () => [], deletedRecordings: async () => [] };
+  current.window.vocalizandoData = {
+    recordings: async () => [...recordings.values()], deletedRecordings: async () => [...deletions],
+    async saveRecording(item) {
+      recordings.set(item.id, item);
+      current.history.addRecordingAttempt(item);
+      current.history.recordingReview(item);
+    },
+    async deleteRecording(id) { recordings.delete(id); deletions.add(id); }
+  };
+  current.window.confirm ||= () => true;
   vm.runInContext(cloudSource, current.context);
-  return { sync: () => vm.runInContext("sync()", current.context), element };
+  await vm.runInContext("cloudReady", current.context);
+  return { sync: () => vm.runInContext("sync()", current.context), element, changeAccount: authChanged };
 }
 
-test("Firebase sync joins full histories using separate device snapshots", async () => {
+test("Supabase sync joins full histories using separate device snapshots", async () => {
   const files = new Map();
   const left = device();
   const right = device();
   left.history.write(countKey, { tara: 1, iii: 0, lastSource: "manual" });
   right.history.write("vocalizing-functional-v1", [{ at, exercise: "voz", prompt: "Frase", score: 71 }]);
   right.history.write("vocalizing-functional-targets-v1", { words: ["neurologia"], phrases: ["Eu quero falar."] });
-  const cloudLeft = connect(left, files);
-  const cloudRight = connect(right, files);
+  const cloudLeft = await connect(left, files);
+  const cloudRight = await connect(right, files);
   await cloudLeft.sync();
   await cloudRight.sync();
   await cloudLeft.sync();
@@ -190,19 +203,99 @@ test("Firebase sync joins full histories using separate device snapshots", async
 
 test("missing history rules produce an actionable message without claiming success", async () => {
   const current = device();
-  const cloud = connect(current, new Map(), { denyHistory: true });
+  const cloud = await connect(current, new Map(), { denyHistory: true });
   await cloud.sync();
   assert.match(cloud.element("cloud-status").textContent, /Histórico ainda não sincronizado/);
   await cloud.element("cloud-login").click();
-  assert.match(cloud.element("cloud-status").textContent, /domínios autorizados/);
+  assert.match(cloud.element("cloud-status").textContent, /URLs autorizadas no Supabase/);
 });
 
 test("another account cannot receive locally owned practice data", async () => {
   const current = device();
-  current.localStorage.setItem("vocalizing-cloud-owner-v2", "another-account");
+  current.localStorage.setItem("vocalizing-supabase-owner-test", "another-account");
   const files = new Map();
-  const cloud = connect(current, files);
+  const cloud = await connect(current, files);
   await cloud.sync();
   assert.match(cloud.element("cloud-status").textContent, /outra conta/);
   assert.equal(files.size, 0);
+});
+
+test("missing configuration keeps local data and disables cloud actions", async () => {
+  const current = device();
+  current.history.write(countKey, { tara: 1, iii: 0 });
+  const before = JSON.stringify(current.history.snapshot());
+  const cloud = await connect(current, new Map(), { configured: false });
+  assert.equal(cloud.element("cloud-login").disabled, true);
+  assert.equal(cloud.element("cloud-sync").disabled, true);
+  assert.match(cloud.element("cloud-status").textContent, /ainda não foi configurado/);
+  await cloud.sync();
+  assert.equal(JSON.stringify(current.history.snapshot()), before);
+});
+
+test("without consent no practice data is transferred", async () => {
+  const files = new Map();
+  const cloud = await connect(device(), files);
+  cloud.element("cloud-consent").checked = false;
+  await cloud.sync();
+  assert.equal(files.size, 0);
+  assert.match(cloud.element("cloud-status").textContent, /autorização/);
+});
+
+test("Firebase ownership requires explicit confirmation before migration", async () => {
+  const current = device();
+  current.localStorage.setItem("vocalizing-cloud-owner-v2", "firebase-account");
+  current.window.confirm = () => false;
+  const files = new Map();
+  const cloud = await connect(current, files);
+  await cloud.sync();
+  assert.equal(files.size, 0);
+  assert.equal(current.localStorage.getItem("vocalizing-supabase-owner-test"), null);
+  assert.match(cloud.element("cloud-status").textContent, /Transferência cancelada/);
+  current.window.confirm = () => true;
+  await cloud.sync();
+  assert.equal(files.size, 1);
+  assert.equal(current.localStorage.getItem("vocalizing-cloud-owner-v2"), "firebase-account");
+});
+
+test("recordings and reviews sync both ways and deletion prevents resurrection", async () => {
+  const left = device();
+  const right = device();
+  const files = new Map();
+  const leftRecordings = new Map();
+  const rightRecordings = new Map();
+  const cloudLeft = await connect(left, files, { recordings: leftRecordings });
+  const cloudRight = await connect(right, files, { recordings: rightRecordings });
+  await left.window.vocalizandoData.saveRecording({ id: "audio-a", kind: "twister", at, updatedAt: at, prompt: "Frase", blob: new Blob(["audio"], { type: "audio/mp4" }) });
+  await cloudLeft.sync();
+  await cloudRight.sync();
+  assert.equal(rightRecordings.size, 1);
+  assert.equal(await rightRecordings.get("audio-a").blob.text(), "audio");
+  assert.equal(right.history.active().length, 1);
+  const reviewed = rightRecordings.get("audio-a");
+  reviewed.listenerResult = "all";
+  reviewed.updatedAt = new Date(Date.now() + 5000).toISOString();
+  await right.window.vocalizandoData.saveRecording(reviewed);
+  await cloudRight.sync();
+  await cloudLeft.sync();
+  assert.equal(leftRecordings.get("audio-a").listenerResult, "all");
+  assert.equal(left.history.active().length, 1);
+  assert.equal(left.history.active()[0].listenerResult, "all");
+  await right.window.vocalizandoData.deleteRecording("audio-a");
+  await cloudRight.sync();
+  await cloudLeft.sync();
+  await cloudRight.sync();
+  assert.equal(leftRecordings.size, 0);
+  assert.equal(rightRecordings.size, 0);
+  assert.equal(files.has("users/test-account/recordings/audio-a"), false);
+  assert.equal(left.history.active().length, 1);
+});
+
+test("an account change during sync cancels it without uploading", async () => {
+  const current = device();
+  const files = new Map();
+  const cloud = await connect(current, files);
+  current.window.vocalizandoLifecycle = { pause: async () => cloud.changeAccount({ uid: "other", email: "other@example.com" }) };
+  await cloud.sync();
+  assert.equal(files.size, 0);
+  assert.match(cloud.element("cloud-status").textContent, /conta mudou/);
 });
